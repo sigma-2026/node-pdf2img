@@ -1,0 +1,21 @@
+{
+  "name": "node-api-framework",
+  "version": "1.0.0",
+  "description": "A standard Node.js API framework using Express",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "nodemon app.js"
+  },
+  "dependencies": {
+    "canvas": "^3.1.2",
+    "dotenv": "^16.0.3",
+    "express": "^4.18.2",
+    "node-fetch": "^3.3.2",
+    "pdfjs-dist": "^5.4.54"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "type": "module"
+}
