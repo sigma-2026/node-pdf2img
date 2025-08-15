@@ -1,12 +1,54 @@
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import path from 'path';
-import { createCanvas } from 'canvas';
 import fetch from 'node-fetch';
-import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
+import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
+
 // 获取当前模块路径
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// 渲染并保存单个PDF页面
+async function renderAndSavePage(page, pageNum, outputDir, pdfDocument) {
+    let canvasAndContext;
+    try {
+        const viewport = page.getViewport({ scale: 1.0 });
+        canvasAndContext = pdfDocument.canvasFactory.create(
+            viewport.width,
+            viewport.height
+        );
+
+        // 渲染 PDF 页面到 Canvas
+        const renderContext = {
+            canvasContext: canvasAndContext.context,
+            viewport,
+        };
+
+        const renderTask = page.render(renderContext);
+        await renderTask.promise;
+
+        // 确保输出目录存在
+        if (!fs.existsSync(outputDir)) {
+            fs.mkdirSync(outputDir);
+        }
+
+        const outputPath = `${outputDir}/page_${pageNum}.png`;
+        const image = canvasAndContext.canvas.toBuffer("image/png");
+        fs.writeFileSync(outputPath, image);
+        console.log(`✅ 页面 ${pageNum} 已保存至: ${outputPath}`);
+
+    } catch (error) {
+        console.error(`❌ 处理页面 ${pageNum} 失败:`, error);
+    } finally {
+        // 确保资源释放
+        if (page) {
+            await page.cleanup();
+        }
+        if (canvasAndContext) {
+            pdfDocument.canvasFactory.reset(canvasAndContext, 1, 1);
+        }
+    }
+}
 
 // 动态导入 PDF.js ES 模块
 async function pdfToImage(pdfPath, outputDir) {
@@ -21,41 +63,44 @@ async function pdfToImage(pdfPath, outputDir) {
         pdfData = new Uint8Array(fs.readFileSync(pdfPath));
     }
 
-    // 配置 PDF.js（需设置 worker 路径）
-    pdfjsLib.GlobalWorkerOptions.workerSrc = path.join(
+    const CMAP_URL = path.join(
         __dirname,
-        'node_modules/pdfjs-dist/build/pdf.worker.mjs'
+        'node_modules/pdfjs-dist/build/cmaps/'
     );
+    const CMAP_PACKED = true;
 
-    // 加载 PDF 文档
-    const pdf = await pdfjsLib.getDocument({ data: pdfData }).promise;
-    const numPages = pdf.numPages;
+    const STANDARD_FONT_DATA_URL =
+        path.join(
+            __dirname,
+            'node_modules/pdfjs-dist/standard_fonts/'
+        );
 
-    // 逐页渲染为图片
-    for (let pageNum = 1; pageNum <= numPages; pageNum++) {
-        const page = await pdf.getPage(pageNum);
-        const viewport = page.getViewport({ scale: 2.0 });
+    const loadingTask = getDocument({
+        data: pdfData,
+        cMapUrl: CMAP_URL,
+        cMapPacked: CMAP_PACKED,
+        standardFontDataUrl: STANDARD_FONT_DATA_URL,
+    });
 
-        // 创建 Canvas
-        const canvas = createCanvas(viewport.width, viewport.height);
-        const ctx = canvas.getContext('2d');
+    try {
+        const pdfDocument = await loadingTask.promise;
+        console.log("PDF document loaded.");
+        const numPages = pdfDocument.numPages;
+        console.log(`PDF 加载成功，共 ${numPages} 页`);
 
-        // 渲染 PDF 页面到 Canvas
-        const renderContext = {
-            canvasContext: ctx,
-            viewport: viewport
-        };
-        await page.render(renderContext).promise;
+        // 逐页渲染为图片
+        for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+            const page = await pdfDocument.getPage(pageNum);
+            await renderAndSavePage(page, pageNum, outputDir, pdfDocument);
 
-        if (!fs.existsSync(outputDir)) {
-            fs.mkdirSync(outputDir);
+            // 每处理3页强制GC（防内存泄漏）
+            if (pageNum % 3 === 0 && global.gc) {
+                global.gc();
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
         }
-        // 保存为 PNG 文件
-        const outputPath = `${outputDir}/page_${pageNum}.png`;
-        const buffer = canvas.toBuffer('image/png');
-        console.log(`buffer: ${buffer.length}`);
-        fs.writeFileSync(outputPath, buffer);
-        console.log(`✅ 页面 ${pageNum} 已保存至: ${outputPath}`);
+    } catch (reason) {
+        console.error("PDF 处理失败:", reason);
     }
 }
 

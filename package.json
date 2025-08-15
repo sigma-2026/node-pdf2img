@@ -4,8 +4,9 @@
   "description": "A standard Node.js API framework using Express",
   "main": "app.js",
   "scripts": {
-    "start": "node app.js",
-    "dev": "nodemon app.js"
+    "clean": "rm -rf ./output",
+    "start": "npm run clean && node --verbose --max-old-space-size=4096 --expose-gc app.js",
+    "dev": "npm run clean && nodemon --verbose --max-old-space-size=8192 --legacy-watch --expose-gc app.js"
   },
   "dependencies": {
     "canvas": "^3.1.2",
@@ -17,5 +18,8 @@
   "devDependencies": {
     "nodemon": "^3.0.1"
   },
-  "type": "module"
+  "type": "module",
+  "overrides": {
+    "canvas": "^3.1.2"
+  }
 }
