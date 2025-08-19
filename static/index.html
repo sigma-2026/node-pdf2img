@@ -23,7 +23,7 @@
 
     // 初始化加载
     async function loadPDF() {
-      const url = 'http://localhost:3000/static/10M.pdf';
+      const url = 'http://localhost:3000/static/500M.pdf';
       const loadingTask = pdfjsLib.getDocument({
         url,
         rangeChunkSize: RANGE_CHUNK_SIZE,

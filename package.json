@@ -9,6 +9,7 @@
     "dev": "npm run clean && nodemon --verbose --max-old-space-size=8192 --legacy-watch --expose-gc app.js"
   },
   "dependencies": {
+    "@mswjs/interceptors": "^0.39.6",
     "canvas": "^3.1.2",
     "dotenv": "^16.0.3",
     "express": "^4.18.2",

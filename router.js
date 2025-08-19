@@ -1,5 +1,5 @@
 import express from 'express';
-import { pdfToImage } from './pdf2img.js';
+import { ExportImage } from './pdf2img.js';
 
 const router = express.Router();
 
@@ -16,8 +16,9 @@ router.get('/pdf2img', async (req, res) => {
   }
 
   try {
-    await pdfToImage(url, process.env.OUTPUT_DIR);
-    console.log('🚀全部截图完成', Date.now() - global.begin + 'ms');
+    const exportImage = new ExportImage();
+    await exportImage.pdfToImage(url, process.env.OUTPUT_DIR);
+    // console.log('🚀全部截图完成', Date.now() - global.begin + 'ms');
     res.send({
       code: 200,
       message: 'ok',
