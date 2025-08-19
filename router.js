@@ -4,6 +4,7 @@ import { pdfToImage } from './pdf2img.js';
 const router = express.Router();
 
 router.get('/pdf2img', async (req, res) => {
+  global.begin = Date.now();
   console.log('触发接口:/api/pdf2img');
   const url = req.query.url;
   if (!url) {
@@ -16,6 +17,7 @@ router.get('/pdf2img', async (req, res) => {
 
   try {
     await pdfToImage(url, process.env.OUTPUT_DIR);
+    console.log('🚀全部截图完成', Date.now() - global.begin + 'ms');
     res.send({
       code: 200,
       message: 'ok',

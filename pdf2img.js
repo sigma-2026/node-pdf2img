@@ -1,7 +1,7 @@
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import path from 'path';
-import fetch from 'node-fetch';
+// import fetch from 'node-fetch';
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 
 // 获取当前模块路径
@@ -52,17 +52,23 @@ async function renderAndSavePage(page, pageNum, outputDir, pdfDocument) {
 
 // 动态导入 PDF.js ES 模块
 async function pdfToImage(pdfPath, outputDir) {
-    let pdfData;
-    if (pdfPath.startsWith('http://') || pdfPath.startsWith('https://')) {
-        // 远程URL：使用fetch下载文件
-        const response = await fetch(pdfPath);
-        const arrayBuffer = await response.arrayBuffer();
-        pdfData = new Uint8Array(arrayBuffer);
-    } else {
-        // 本地路径：使用fs读取文件
-        pdfData = new Uint8Array(fs.readFileSync(pdfPath));
-    }
+    console.log("pdfToImage");
+    // let pdfData;
+    // if (pdfPath.startsWith('http://') || pdfPath.startsWith('https://')) {
+    //     // 远程URL：使用fetch下载文件
+    //     const response = await fetch(pdfPath);
+    //     console.log("response", response.status);
+    //     if (response.status !== 200) {
+    //         throw new Error(`Failed to fetch PDF: ${response.statusText}`);
+    //     }
+    //     const arrayBuffer = await response.arrayBuffer();
+    //     pdfData = new Uint8Array(arrayBuffer);
+    // } else {
+    //     // 本地路径：使用fs读取文件
+    //     pdfData = new Uint8Array(fs.readFileSync(pdfPath));
+    // }
 
+    
     const CMAP_URL = path.join(
         __dirname,
         'node_modules/pdfjs-dist/build/cmaps/'
@@ -74,14 +80,16 @@ async function pdfToImage(pdfPath, outputDir) {
             __dirname,
             'node_modules/pdfjs-dist/standard_fonts/'
         );
-
+    console.log("pdfPath", pdfPath);
     const loadingTask = getDocument({
-        data: pdfData,
+        url: pdfPath,
         cMapUrl: CMAP_URL,
         cMapPacked: CMAP_PACKED,
         standardFontDataUrl: STANDARD_FONT_DATA_URL,
+        rangeChunkSize: 150 * 1024, // 分片大小
+        disableAutoFetch: true, // 关闭自动全量下载
     });
-
+    console.log("getDocument");
     try {
         const pdfDocument = await loadingTask.promise;
         console.log("PDF document loaded.");
@@ -89,14 +97,16 @@ async function pdfToImage(pdfPath, outputDir) {
         console.log(`PDF 加载成功，共 ${numPages} 页`);
 
         // 逐页渲染为图片
-        for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+        for (let pageNum = 1; pageNum <= 1; pageNum++) {
             const page = await pdfDocument.getPage(pageNum);
             await renderAndSavePage(page, pageNum, outputDir, pdfDocument);
-
+            if (pageNum === 1) {
+                console.log('🚀首页截图完成', Date.now() - global.begin + 'ms');
+            }
             // 每处理3页强制GC（防内存泄漏）
             if (pageNum % 3 === 0 && global.gc) {
                 global.gc();
-                await new Promise(resolve => setTimeout(resolve, 100));
+                await new Promise(resolve => setTimeout(resolve, 10));
             }
         }
     } catch (reason) {

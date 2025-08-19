@@ -8,3 +8,8 @@ http://localhost:3000/api/pdf2img?url=https://mozilla.github.io/pdf.js/web/compr
 2、pm2
 
 3、数据分片探索
+
+
+# 请求示例：
+
+http://localhost:3000/api/pdf2img?url=http://localhost:3000/static/1M.pdf
