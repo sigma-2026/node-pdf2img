@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>PDF.js 分片加载 Demo</title>
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.4.120/build/pdf.min.js"></script>
+  <style>
+    #pdf-container { position: relative; }
+    .page-canvas { display: block; margin: 10px auto; border: 1px solid #ddd; }
+  </style>
+</head>
+<body>
+  <div id="pdf-container"></div>
+  <script>
+    // 配置 Worker
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 
+      'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.4.120/build/pdf.worker.min.js';
+
+    // 核心参数
+    const RANGE_CHUNK_SIZE = 1024 * 1024; // 1MB 分片
+    const VISIBLE_PAGE_RANGE = 3; // 预加载前后3页
+    let pdfDoc = null;
+    let renderedPages = new Set();
+
+    // 初始化加载
+    async function loadPDF() {
+      const url = 'http://localhost:3000/static/10M.pdf';
+      const loadingTask = pdfjsLib.getDocument({
+        url,
+        rangeChunkSize: RANGE_CHUNK_SIZE,
+        disableAutoFetch: true // 关键：禁用自动全量加载[1,6](@ref)
+      });
+
+      try {
+        pdfDoc = await loadingTask.promise;
+        renderVisiblePages();
+        window.addEventListener('scroll', throttle(handleScroll, 200));
+      } catch (err) {
+        console.error('PDF加载失败:', err);
+      }
+    }
+
+    // 渲染可见页
+    async function renderVisiblePages() {
+      const scrollTop = window.scrollY;
+      const viewHeight = window.innerHeight;
+      const startPage = Math.max(1, Math.floor(scrollTop / 1000));
+      const endPage = Math.min(pdfDoc.numPages, startPage + VISIBLE_PAGE_RANGE);
+      
+      // 渲染新页
+      for (let i = startPage; i <= endPage; i++) {
+        if (!renderedPages.has(i)) {
+          await renderPage(i);
+          renderedPages.add(i);
+        }
+      }
+      
+      // 清理不可见页
+      renderedPages.forEach(page => {
+        if (page < startPage || page > endPage) {
+          document.getElementById(`page-${page}`)?.remove();
+          renderedPages.delete(page);
+        }
+      });
+    }
+
+    // 单页渲染
+    async function renderPage(pageNum) {
+      const page = await pdfDoc.getPage(pageNum);
+      const viewport = page.getViewport({ scale: 1.5 });
+      const canvas = document.createElement('canvas');
+      canvas.id = `page-${pageNum}`;
+      canvas.className = 'page-canvas';
+      canvas.height = viewport.height;
+      canvas.width = viewport.width;
+      document.getElementById('pdf-container').appendChild(canvas);
+      
+      // 渲染到 Canvas
+      await page.render({
+        canvasContext: canvas.getContext('2d'),
+        viewport
+      }).promise;
+    }
+
+    // 滚动监听（节流）
+    function handleScroll() {
+      renderVisiblePages();
+    }
+
+    function throttle(func, delay) {
+      let lastCall = 0;
+      return function (...args) {
+        const now = Date.now();
+        if (now - lastCall >= delay) {
+          func.apply(this, args);
+          lastCall = now;
+        }
+      };
+    }
+
+    // 启动
+    window.onload = loadPDF;
+  </script>
+</body>
+</html>
