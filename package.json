@@ -4,7 +4,7 @@
   "description": "A standard Node.js API framework using Express",
   "main": "app.js",
   "scripts": {
-    "clean": "rm -rf ./output",
+    "clean": "npm config set engine-strict true && rm -rf ./output",
     "start": "npm run clean && node --verbose --max-old-space-size=4096 --expose-gc app.js",
     "dev": "npm run clean && nodemon --verbose --max-old-space-size=8192 --legacy-watch --expose-gc app.js"
   },
@@ -21,5 +21,8 @@
   "type": "module",
   "overrides": {
     "canvas": "^3.1.2"
+  },
+  "engines": {
+    "node": ">=20.0.0"
   }
 }
