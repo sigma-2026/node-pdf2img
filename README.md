@@ -52,3 +52,23 @@ npm run pm2
 
 ## 带页码多页
 <img src='./image1.png'>
+
+
+# docker 镜像
+0、启动docker
+```
+1、打镜像
+docker build -t pdf2img:v1.0.0 ./ 
+
+2、查看镜像
+docker images 
+
+3、打tag
+docker tag 486ff26017ff mirrors.tencent.com/tdocs-pdf/pdf2img:v2
+
+4、推送
+docker push mirrors.tencent.com/tdocs-pdf/pdf2img:v2
+
+5、登陆
+docker login --username johnsomwu --password [token] mirrors.tencent.com
+```
