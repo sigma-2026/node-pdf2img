@@ -66,6 +66,8 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(express.json());
+// 处理表单数据
+app.use(express.urlencoded({ extended: true }));
 
 // 关键配置：静态资源服务支持 Range 请求
 app.use('/static', (req, res, next) => {
@@ -85,14 +87,6 @@ app.use('/static', (req, res, next) => {
     }
   })(req, res, next);
 });
-
-// app.use('/static', express.static(path.join(__dirname, 'static'), {
-//   setHeaders: (res) => {
-//     console.log('访问静态资源服务');
-//     res.setHeader('Accept-Ranges', 'bytes'); // 启用分片请求
-//     res.setHeader('Access-Control-Expose-Headers', 'Accept-Ranges, Content-Range');
-//   }
-// }));
 
 // Routes
 app.use('/api', apiRouter);

@@ -17,10 +17,14 @@ class ExportImage {
     pdfSize = 0;
     pdfPath = '';
 
-
     // 动态导入 PDF.js ES 模块
-    async pdfToImage(pdfPath, outputDir) {
+    async pdfToImage({
+        pdfPath,
+        outputDir,
+        pages = [1],
+    }) {
         console.log("pdfToImage");
+        this.pdfPath = pdfPath;
         const CMAP_URL = path.join(
             __dirname,
             'node_modules/pdfjs-dist/build/cmaps/'
@@ -32,12 +36,6 @@ class ExportImage {
                 __dirname,
                 'node_modules/pdfjs-dist/standard_fonts/'
             );
-        this.pdfPath = "https://tencent-docs-1251316161.cos.ap-guangzhou.myqcloud.com/b73b10644b264b8fbe85862e2bd6dcc8?q-sign-algorithm=sha1&q-ak=AKIDOaU77sym0yh8BzgXnmnvnPcq66qIKEOH&q-sign-time=1755605131;1755606931&q-key-time=1755605131;1755606931&q-header-list=&q-url-param-list=response-content-disposition;response-expires&q-signature=be24bca9a9683dcaf0f394e07a807f06314da513&response-content-disposition=attachment%3Bfilename%3D1M.pdf%3Bfilename%2A%3Dutf-8%27%271M.pdf&response-expires=1800"
-        // this.pdfPath = "https://tencent-docs-1251316161.cos.ap-guangzhou.myqcloud.com/1e1f1b81b55f43acb33293e6ec627937?q-sign-algorithm=sha1&q-ak=AKIDOaU77sym0yh8BzgXnmnvnPcq66qIKEOH&q-sign-time=1755605014;1755606814&q-key-time=1755605014;1755606814&q-header-list=&q-url-param-list=response-content-disposition;response-expires&q-signature=62422233c873ff10a1ee68caeb581e7e51a90178&response-content-disposition=attachment%3Bfilename%3D5M.pdf%3Bfilename%2A%3Dutf-8%27%275M.pdf&response-expires=1800"
-        // this.pdfPath = "https://tencent-docs-1251316161.cos.ap-guangzhou.myqcloud.com/87fba482af7248aca30a57b84b217b1e?q-sign-algorithm=sha1&q-ak=AKIDOaU77sym0yh8BzgXnmnvnPcq66qIKEOH&q-sign-time=1755604905;1755606705&q-key-time=1755604905;1755606705&q-header-list=&q-url-param-list=response-content-disposition;response-expires&q-signature=dafc0aa921279f8587edb363ff8e1d0f50b0a2e9&response-content-disposition=attachment%3Bfilename%3D10M.pdf%3Bfilename%2A%3Dutf-8%27%2710M.pdf&response-expires=1800";
-        // this.pdfPath = "https://tencent-docs-1251316161.cos.ap-guangzhou.myqcloud.com/f36db534038d41ff9f5ad33f3905b0fd?q-sign-algorithm=sha1&q-ak=AKIDOaU77sym0yh8BzgXnmnvnPcq66qIKEOH&q-sign-time=1755604746;1755606546&q-key-time=1755604746;1755606546&q-header-list=&q-url-param-list=response-content-disposition;response-expires&q-signature=d2d88e840c205780b1fe231b72347f84e5263fc7&response-content-disposition=attachment%3Bfilename%3D80M.pdf%3Bfilename%2A%3Dutf-8%27%2780M.pdf&response-expires=1800"
-        // this.pdfPath = "https://tencent-docs-1251316161.cos.ap-guangzhou.myqcloud.com/5645031f214049458ca1489fbab1c2f5?q-sign-algorithm=sha1&q-ak=AKIDOaU77sym0yh8BzgXnmnvnPcq66qIKEOH&q-sign-time=1755603219;1755605019&q-key-time=1755603219;1755605019&q-header-list=&q-url-param-list=response-content-disposition;response-expires&q-signature=7c5328fcc5f632f8632001e0bb46425d21b76e40&response-content-disposition=attachment%3Bfilename%3D500M.pdf%3Bfilename%2A%3Dutf-8%27%27500M.pdf&response-expires=1800";
-        console.log("pdfPath", this.pdfPath);
         // 先拿首片数据 10KB
         const initialData = await this.generateInitDataPromise();
         const rangeLoader = new RangeLoader(this.pdfSize, initialData, this.pdfPath, EACH_CHUNK_SIZE);
@@ -58,12 +56,15 @@ class ExportImage {
             const numPages = pdfDocument.numPages;
             console.log(`PDF 加载成功，共 ${numPages} 页`);
 
+            console.log("截图 pages", pages, typeof pages);
             // 逐页渲染为图片
-            for (let pageNum = 1; pageNum <= 1; pageNum++) {
+            for (let i = 0; i < pages.length; i++) {
+                const pageNum = pages[i];
+                console.log("pageNum", pageNum);
                 const page = await pdfDocument.getPage(pageNum);
                 await this.renderAndSavePage(page, pageNum, outputDir, pdfDocument);
-                if (pageNum === 1) {
-                    console.log('🚀首页截图完成', Date.now() - global.begin + 'ms');
+                if (i === 0) {
+                    console.log('🚀首张截图完成', Date.now() - global.begin + 'ms');
                 }
                 // 每处理3页强制GC（防内存泄漏）
                 if (pageNum % 3 === 0 && global.gc) {
@@ -71,8 +72,9 @@ class ExportImage {
                     await new Promise(resolve => setTimeout(resolve, 10));
                 }
             }
+            console.log('🚀全部截图完成', Date.now() - global.begin + 'ms');
         } catch (reason) {
-            console.error("PDF 处理失败:", reason);
+            throw new Error("截图处理失败:", reason);
         }
     }
 
@@ -162,19 +164,18 @@ class RangeLoader extends PDFDataRangeTransport {
                 const result = this.getDataByRangeLimit({ start: eachStart, end: eachEnd });
                 return result;
             }));
-        console.log('datas', datas);
+        // console.log('datas', datas);
         const byteLength = datas.reduce((total, data) => total + data.byteLength, 0);
-        console.log('byteLength', byteLength);
+        // console.log('byteLength', byteLength);
         const byteData = new Uint8Array(byteLength);
         let offset = 0;
         for (const data of datas) {
             byteData.set(new Uint8Array(data), offset);
             offset += data.byteLength;
         }
-        console.log('byteData', byteData);
+        // console.log('byteData', byteData);
         this.onDataProgress(byteData.byteLength, this.pdfSize);
         this.onDataRange(start, byteData);
-        return byteData;
     }
 
     getBatchGroups(start, end, limitLength) {

@@ -3,10 +3,10 @@ import { ExportImage } from './pdf2img.js';
 
 const router = express.Router();
 
-router.get('/pdf2img', async (req, res) => {
+router.post('/pdf2img', async (req, res) => {
   global.begin = Date.now();
   console.log('触发接口:/api/pdf2img');
-  const url = req.query.url;
+  const url = req.body.url;
   if (!url) {
     console.log('无 url 拦截');
     return res.status(400).send({
@@ -17,8 +17,14 @@ router.get('/pdf2img', async (req, res) => {
 
   try {
     const exportImage = new ExportImage();
-    await exportImage.pdfToImage(url, process.env.OUTPUT_DIR);
-    // console.log('🚀全部截图完成', Date.now() - global.begin + 'ms');
+    const pages = req.body.pages
+      ? (typeof req.body.pages === 'string' ? JSON.parse(req.body.pages) : req.body.pages)
+      : [1];
+    await exportImage.pdfToImage({
+      pdfPath: url,
+      outputDir: process.env.OUTPUT_DIR,
+      pages: pages,
+    });
     res.send({
       code: 200,
       message: 'ok',
