@@ -34,10 +34,6 @@ npm install pm2 -g
 npm run pm2
 ```
 
-# 访问示例
-http://localhost:3000/api/pdf2img?url=https://mozilla.github.io/pdf.js/web/compressed.tracemonkey-pldi-09.pdf
-
-
 # 特性
 
 * 支持数据分片，拆4个子片，并发请求
