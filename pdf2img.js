@@ -3,6 +3,8 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 import fetch from 'node-fetch';
 import { getDocument, PDFDataRangeTransport } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { randomUUID } from 'crypto';
+
 // 每片的请求大小 1 MB
 const EACH_CHUNK_SIZE = 1024 * 1024;
 // 拆分后最小chunk请求大小 256kb
@@ -38,7 +40,13 @@ class ExportImage {
                 'node_modules/pdfjs-dist/standard_fonts/'
             );
         // 先拿首片数据 10KB
-        const initialData = await this.generateInitDataPromise();
+        let initialData;
+        try {
+            initialData = await this.generateInitDataPromise();
+        } catch (error) {
+            throw new Error(error);
+        }
+
         const rangeLoader = new RangeLoader(this.pdfSize, initialData, this.pdfPath, EACH_CHUNK_SIZE);
         // 再分页加载
         const loadingTask = getDocument({
@@ -107,7 +115,7 @@ class ExportImage {
                 fs.mkdirSync(outputDir);
             }
 
-            outputPath = `${outputDir}/page_${pageNum}.png`;
+            outputPath = `${outputDir}/page_${pageNum}_${randomUUID()}.png`;
             const image = canvasAndContext.canvas.toBuffer("image/png");
             fs.writeFileSync(outputPath, image);
             console.log(`✅ 页面 ${pageNum} 已保存至: ${outputPath}`);
@@ -146,7 +154,9 @@ class ExportImage {
                 },
             })
             .then(response => {
-                console.log('response', response.status);
+                if (response.status !== 206 && response.status !== 200) {
+                    throw new Error(`请求初始数据失败: ${response.status} ${response.statusText}`);
+                }
                 this.pdfSize = this.getDocumentSize(response);
                 console.log('pdfSize', this.pdfSize);
                 return response.arrayBuffer();
