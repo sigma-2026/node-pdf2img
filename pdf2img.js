@@ -23,6 +23,7 @@ class ExportImage {
         outputDir,
         pages = [1],
     }) {
+        let data = [];
         console.log("pdfToImage");
         this.pdfPath = pdfPath;
         const CMAP_URL = path.join(
@@ -60,11 +61,12 @@ class ExportImage {
             // 逐页渲染为图片
             for (let i = 0; i < pages.length; i++) {
                 const pageNum = pages[i];
-                console.log("pageNum", pageNum);
+                console.log("正在截图pageNum", pageNum);
                 const page = await pdfDocument.getPage(pageNum);
-                await this.renderAndSavePage(page, pageNum, outputDir, pdfDocument);
+                const outputPath = await this.renderAndSavePage(page, pageNum, outputDir, pdfDocument);
+                data.push(outputPath);
                 if (i === 0) {
-                    console.log('🚀首张截图完成', Date.now() - global.begin + 'ms');
+                    console.log('🚀首张截图完成耗时', Date.now() - global.begin + 'ms');
                 }
                 // 每处理3页强制GC（防内存泄漏）
                 if (pageNum % 3 === 0 && global.gc) {
@@ -72,15 +74,18 @@ class ExportImage {
                     await new Promise(resolve => setTimeout(resolve, 10));
                 }
             }
-            console.log('🚀全部截图完成', Date.now() - global.begin + 'ms');
+            console.log('🚀全部截图完成耗时', Date.now() - global.begin + 'ms');
         } catch (reason) {
             throw new Error("截图处理失败:", reason);
         }
+
+        return data;
     }
 
     // 渲染并保存单个PDF页面
     async renderAndSavePage(page, pageNum, outputDir, pdfDocument) {
         let canvasAndContext;
+        let outputPath = '';
         try {
             const viewport = page.getViewport({ scale: 1.0 });
             canvasAndContext = pdfDocument.canvasFactory.create(
@@ -102,13 +107,12 @@ class ExportImage {
                 fs.mkdirSync(outputDir);
             }
 
-            const outputPath = `${outputDir}/page_${pageNum}.png`;
+            outputPath = `${outputDir}/page_${pageNum}.png`;
             const image = canvasAndContext.canvas.toBuffer("image/png");
             fs.writeFileSync(outputPath, image);
             console.log(`✅ 页面 ${pageNum} 已保存至: ${outputPath}`);
-
         } catch (error) {
-            console.error(`❌ 处理页面 ${pageNum} 失败:`, error);
+            console.error(`❌处理页面 ${pageNum} 失败:`, error);
         } finally {
             // 确保资源释放
             if (page) {
@@ -118,6 +122,7 @@ class ExportImage {
                 pdfDocument.canvasFactory.reset(canvasAndContext, 1, 1);
             }
         }
+        return outputPath;
     }
 
     getDocumentSize(response) {
@@ -141,6 +146,7 @@ class ExportImage {
                 },
             })
             .then(response => {
+                console.log('response', response.status);
                 this.pdfSize = this.getDocumentSize(response);
                 console.log('pdfSize', this.pdfSize);
                 return response.arrayBuffer();

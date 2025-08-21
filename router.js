@@ -20,19 +20,21 @@ router.post('/pdf2img', async (req, res) => {
     const pages = req.body.pages
       ? (typeof req.body.pages === 'string' ? JSON.parse(req.body.pages) : req.body.pages)
       : [1];
-    await exportImage.pdfToImage({
+    const data = await exportImage.pdfToImage({
       pdfPath: url,
       outputDir: process.env.OUTPUT_DIR,
       pages: pages,
     });
     res.send({
       code: 200,
+      data: data,
       message: 'ok',
     });
   } catch (error) {
     console.error('错误异常', error);
     res.send({
       code: 500,
+      data: null,
       message: error.message,
     });
   }
