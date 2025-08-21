@@ -54,8 +54,9 @@ npm run pm2
 <img src='./image1.png'>
 
 
-# docker 镜像
-0、启动docker
+# docker 镜像(devcloud)
+
+## mirrors.tencent.com
 ```
 1、打镜像
 docker build -t pdf2img:v1.0.0 ./ 
@@ -71,4 +72,22 @@ docker push mirrors.tencent.com/tdocs-pdf/pdf2img:v2
 
 5、登陆
 docker login --username johnsomwu --password [token] mirrors.tencent.com
+```
+
+## csighub.tencentyun.com
+```
+1、打镜像
+sudo docker build -t pdf2img:[tag] ./
+
+2、查看镜像[imageid]
+sudo docker images
+
+3、打tag
+sudo docker tag [imageid] csighub.tencentyun.com/pdf-developer/pdf2img:[tag]
+
+4、push
+sudo docker push csighub.tencentyun.com/pdf-developer/pdf2img:[tag]
+
+5、登陆
+sudo docker login csighub.tencentyun.com
 ```
