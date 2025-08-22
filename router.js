@@ -16,7 +16,8 @@ router.post('/pdf2img', async (req, res) => {
   }
 
   try {
-    const exportImage = new ExportImage();
+    const globalPadId = req.body.globalPadId;
+    const exportImage = new ExportImage({ globalPadId });
     const pages = req.body.pages
       ? (typeof req.body.pages === 'string' ? JSON.parse(req.body.pages) : req.body.pages)
       : [1];
