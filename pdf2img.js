@@ -3,7 +3,7 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 import fetch from 'node-fetch';
 import { getDocument, PDFDataRangeTransport } from "pdfjs-dist/legacy/build/pdf.mjs";
-import { randomUUID } from 'crypto';
+import { IS_DEV } from './tool/env.js';
 import { uploadFiles } from './tool/upload-file.js';
 
 // 每片的请求大小 1 MB
@@ -24,12 +24,18 @@ class ExportImage {
         this.globalPadId = globalPadId;
     }
 
-    // 动态导入 PDF.js ES 模块
+    /**
+     * pdf 转图片
+     * @param pdfPath pdf路径
+     * @param outputDir 输出目录(仅本地调试需要)
+     * @param pages 需要截图的页码, 不传则全量截图
+     */
     async pdfToImage({
         pdfPath,
         outputDir,
-        pages = [1],
+        pages,
     }) {
+        // 运行在本地时候返回路径, 运行在服务器时候返回cos地址
         let data = [];
         console.log("pdfToImage");
         this.pdfPath = pdfPath;
@@ -69,8 +75,14 @@ class ExportImage {
             console.log("PDF document loaded.");
             const numPages = pdfDocument.numPages;
             console.log(`PDF 加载成功，共 ${numPages} 页`);
+            // 不传则全量截图
+            if (!pages) {
+                pages = Array.from({ length: numPages }, (_, i) => i + 1);
+                console.log("全量截图");
+            } else {
+                console.log("部分截图 pages:", pages);
+            }
 
-            console.log("截图 pages", pages, typeof pages);
             // 逐页渲染为图片
             const bufferArr = [];
             for (let i = 0; i < pages.length; i++) {
@@ -78,7 +90,12 @@ class ExportImage {
                 console.log("正在截图pageNum", pageNum);
                 const page = await pdfDocument.getPage(pageNum);
                 const bufferInfo = await this.renderAndSavePage(page, pageNum, outputDir, pdfDocument);
-                bufferArr.push(bufferInfo);
+                if (IS_DEV) {
+                    data.push(bufferInfo);
+                } else {
+                    bufferArr.push(bufferInfo);
+                }
+
                 if (i === 0) {
                     console.log('🚀首张截图完成耗时', Date.now() - global.begin + 'ms');
                 }
@@ -88,13 +105,20 @@ class ExportImage {
                     await new Promise(resolve => setTimeout(resolve, 10));
                 }
             }
-            console.log('开始上传', bufferArr.length, '个文件');
-            const response = await uploadFiles({ globalPadId: this.globalPadId, bufferArr });
-            console.log('response.files', response.files);
-            response.files.forEach((file) => {
-                data.push('/' + file.options.Key);
-            });
-            console.log('🚀全部截图+上次cos完成耗时', Date.now() - global.begin + 'ms');
+
+            // 上传
+            if (!IS_DEV) {
+                console.log('开始上传cos', bufferArr.length, '个文件');
+                const response = await uploadFiles({ globalPadId: this.globalPadId, bufferArr });
+                console.log('response.files', response.files);
+                response.files.forEach((file) => {
+                    data.push('/' + file.options.Key);
+                });
+                console.log('🚀全部截图+上次cos完成耗时', Date.now() - global.begin + 'ms');
+            } else {
+                console.log('🚀本地全部截图完成耗时', Date.now() - global.begin + 'ms');
+            }
+
         } catch (reason) {
             throw new Error("截图处理失败:", reason);
         }
@@ -105,7 +129,10 @@ class ExportImage {
     // 渲染并保存单个PDF页面
     async renderAndSavePage(page, pageNum, outputDir, pdfDocument) {
         let canvasAndContext;
+        // 远程环境
         let bufferInfo = {};
+        // 本地开发
+        let outputPath = '';
         try {
             const viewport = page.getViewport({ scale: 1.0 });
             canvasAndContext = pdfDocument.canvasFactory.create(
@@ -122,19 +149,22 @@ class ExportImage {
             const renderTask = page.render(renderContext);
             await renderTask.promise;
 
-            // 确保输出目录存在
-            if (!fs.existsSync(outputDir)) {
-                fs.mkdirSync(outputDir);
+            if (IS_DEV) {
+                // 本地环境确保输出目录存在
+                if (!fs.existsSync(outputDir)) {
+                    fs.mkdirSync(outputDir);
+                }
+                outputPath = `${outputDir}/page_${pageNum}.png`;
+                const image = canvasAndContext.canvas.toBuffer("image/png");
+                fs.writeFileSync(outputPath, image);
+                console.log(`✅ 页面 ${pageNum} 已保存至: ${outputPath}`);
+            } else {
+                const image = canvasAndContext.canvas.toBuffer("image/png");
+                bufferInfo = {
+                    pageNum,
+                    buffer: image,
+                };
             }
-
-            // outputPath = `${outputDir}/page_${pageNum}_${randomUUID()}.png`;
-            const image = canvasAndContext.canvas.toBuffer("image/png");
-            bufferInfo = {
-                pageNum,
-                buffer: image,
-            };
-            // fs.writeFileSync(outputPath, image);
-            // console.log(`✅ 页面 ${pageNum} 已保存至: ${outputPath}`);
         } catch (error) {
             console.error(`❌处理页面 ${pageNum} 失败:`, error);
         } finally {
@@ -146,6 +176,11 @@ class ExportImage {
                 pdfDocument.canvasFactory.reset(canvasAndContext, 1, 1);
             }
         }
+
+        if (IS_DEV) {
+            return outputPath;
+        }
+
         return bufferInfo;
     }
 

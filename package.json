@@ -5,8 +5,9 @@
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
-    "dev": "nodemon app.js",
+    "dev": "NODE_ENV=dev nodemon app.js",
     "pm2": "pm2 start app.js --no-daemon --env production",
+    "docker:push": "node ./tool/exec-docker-push.js",
     "prod": "node entry.js"
   },
   "keywords": [],
