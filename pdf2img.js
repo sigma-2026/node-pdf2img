@@ -134,7 +134,7 @@ class ExportImage {
         // 本地开发
         let outputPath = '';
         try {
-            const viewport = page.getViewport({ scale: 1.0 });
+            const viewport = page.getViewport({ scale: 2.0 });
             canvasAndContext = pdfDocument.canvasFactory.create(
                 viewport.width,
                 viewport.height
