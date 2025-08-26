@@ -80,6 +80,8 @@ class ExportImage {
                 pages = Array.from({ length: numPages }, (_, i) => i + 1);
                 console.log("全量截图");
             } else {
+                //  去重
+                pages = [...new Set(pages)];
                 console.log("部分截图 pages:", pages);
             }
 
@@ -88,6 +90,11 @@ class ExportImage {
             for (let i = 0; i < pages.length; i++) {
                 const pageNum = pages[i];
                 console.log("正在截图pageNum", pageNum);
+                if (pageNum > numPages) {
+                    console.log("pageNum > numPages, 跳过", { pageNum, numPages });
+                    continue;
+                }
+
                 const page = await pdfDocument.getPage(pageNum);
                 const bufferInfo = await this.renderAndSavePage(page, pageNum, outputDir, pdfDocument);
                 if (IS_DEV) {
