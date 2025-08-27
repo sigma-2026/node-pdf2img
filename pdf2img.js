@@ -90,8 +90,12 @@ class ExportImage {
                 console.log('开始上传cos', bufferArr.length, '个文件');
                 const response = await uploadFiles({ globalPadId: this.globalPadId, bufferArr });
                 console.log('response.files', response.files);
-                response.files.forEach((file) => {
-                    data.push('/' + file.options.Key);
+                response.files.forEach((file, index) => {
+                    data.push({
+                        cosKey: '/' + file.options.Key,
+                        width: bufferArr[index].width,
+                        height: bufferArr[index].height,
+                    });
                 });
                 console.log('🚀全部截图+上次cos完成耗时', Date.now() - global.begin + 'ms');
             } else {
@@ -114,8 +118,8 @@ class ExportImage {
             pages = Array.from({ length: numPages }, (_, i) => i + 1);
             console.log("全量截图");
         } else if (!pages) {
-            pages = Array.from({ length: Math.min(numPages, 4) }, (_, i) => i + 1);
-            console.log("前四页截图");
+            pages = Array.from({ length: Math.min(numPages, 3) }, (_, i) => i + 1);
+            console.log("前3页截图");
         } else {
             //  去重
             pages = [...new Set(pages)];
@@ -232,6 +236,8 @@ class ExportImage {
                 bufferInfo = {
                     pageNum,
                     buffer: image,
+                    width: viewport.width,
+                    height: viewport.height,
                 };
             }
         } catch (error) {
