@@ -11,11 +11,10 @@ const cosConfig = {
  */
 export const uploadFiles = async ({ globalPadId, bufferArr }) => {
     console.log('uploadFiles', globalPadId);
-    // console.log('bufferArr', bufferArr);
-    const cos = await getCosInstance();
-    const filePrefix = `${cosConfig.path}/${globalPadId}`;
-    console.log('filePrefix', filePrefix);
     try {
+        const cos = await getCosInstance();
+        const filePrefix = `${cosConfig.path}/${globalPadId}`;
+        console.log('filePrefix', filePrefix);
         const response = await cos.uploadFiles({
             files: bufferArr.map((one) => {
                 // console.log('one', one);
