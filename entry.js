@@ -27,11 +27,11 @@ class EnvBuilder {
   WHITEBOX_FILE="./ssm/whitebox.txt"
   # 拷贝AKSK依赖文件
   if [ -f "$PROFILE_FILE" ] && [ -f "$WHITEBOX_FILE" ]; then
-    sudo mkdir -p /usr/local/aksk
-    sudo chmod o+w /usr/local/aksk
-    sudo base64 -d "$WHITEBOX_FILE" > /usr/local/aksk/whitebox.bin
-    sudo cp -f "$PROFILE_FILE" /usr/local/aksk/profile.json
-    sudo echo "[INFO] copy whitebox.bin and profile.json to /usr/local/aksk"
+    mkdir -p /usr/local/aksk
+    chmod o+w /usr/local/aksk
+    base64 -d "$WHITEBOX_FILE" > /usr/local/aksk/whitebox.bin
+    cp -f "$PROFILE_FILE" /usr/local/aksk/profile.json
+    echo "[INFO] copy whitebox.bin and profile.json to /usr/local/aksk"
   fi
   `;
     try {
