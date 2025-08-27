@@ -110,9 +110,12 @@ class ExportImage {
     async captureByPages({ pages, numPages, pdfDocument, outputDir }) {
         const data = [];
 
-        if (!pages) {
+        if (pages === 'all') {
             pages = Array.from({ length: numPages }, (_, i) => i + 1);
             console.log("全量截图");
+        } else if (!pages) {
+            pages = Array.from({ length: Math.min(numPages, 4) }, (_, i) => i + 1);
+            console.log("前四页截图");
         } else {
             //  去重
             pages = [...new Set(pages)];
