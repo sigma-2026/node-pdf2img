@@ -7,6 +7,7 @@ router.post('/pdf2img', async (req, res) => {
   global.begin = Date.now();
   console.log('触发接口:/api/pdf2img');
   const url = req.body.url;
+  const globalPadId = req.body.globalPadId;
   if (!url) {
     console.log('无 url 拦截');
     return res.status(400).send({
@@ -15,16 +16,27 @@ router.post('/pdf2img', async (req, res) => {
     });
   }
 
+  if (!globalPadId) {
+    console.log('无 globalPadId 拦截');
+    return res.status(400).send({
+      code: 400,
+      message: 'globalPadId is required',
+    });
+  }
+
   try {
-    const globalPadId = req.body.globalPadId;
     const exportImage = new ExportImage({ globalPadId });
     const pages = req.body.pages
       ? (typeof req.body.pages === 'string' ? JSON.parse(req.body.pages) : req.body.pages)
       : null;
+    const screen = req.body.screen
+      ? (typeof req.body.screen === 'string' ? JSON.parse(req.body.screen) : req.body.screen)
+      : null;
     const data = await exportImage.pdfToImage({
       pdfPath: url,
       outputDir: process.env.OUTPUT_DIR,
-      pages: pages,
+      pages,
+      screen,
     });
     res.send({
       code: 200,
