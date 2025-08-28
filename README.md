@@ -100,3 +100,35 @@ sudo docker tag [imageid] csighub.tencentyun.com/pdf-developer/pdf2img:[tag]
 4、push
 sudo docker push csighub.tencentyun.com/pdf-developer/pdf2img:[tag]
 ```
+
+# 镜像调试
+
+```
+// 运行
+sudo docker run -d --name my-container -p 3000-3002:3000-3002 pdf2img:202508272112
+// 停止
+sudo docker stop my-container
+// 移除
+sudo docker remove my-container
+// 查看docker内存占用
+docker stats my-container
+// 查看docker日志
+docker logs my-container
+
+```
+
+# 压测
+```bash
+autocannon "http://localhost:3000/api/pdf2img" \
+  -m POST \                              # 指定 POST 方法
+  -H "Content-Type: application/json" \  # 设置 JSON 请求头
+  -b '{"url":"https://example.com/doc.pdf", "globalPadId":"12345"}' \  # 必需参数
+  -c 50 \                                # 50 个并发连接
+  -p 5 \                                 # 每个连接管道化 5 个请求（提升吞吐）
+  -d 30 \                                # 持续测试 30 秒
+  -l \                                   # 输出完整延迟分布
+  -j > report.json                       # 生成 JSON 格式报告
+
+// demo
+autocannon "http://localhost:3000/api/pdf2img" -m POST -H "Content-Type: application/json" -b '{"url":"https://tencent-docs-1251316161.cos.ap-guangzhou.myqcloud.com/f4e87a106ecd465099042e3f38781ca1?q-sign-algorithm=sha1&q-ak=AKIDOaU77sym0yh8BzgXnmnvnPcq66qIKEOH&q-sign-time=1756345008;1756346808&q-key-time=1756345008;1756346808&q-header-list=&q-url-param-list=response-content-disposition;response-expires&q-signature=b498de1febc3ca89c55c21a36fd19bb3323696d0&response-content-disposition=attachment%3Bfilename%3D%25E9%2587%2591%25E5%25B1%25B1-%25E9%2599%2588%25E6%25B5%25A9%25E8%258D%25A3%2520%25281%2529%2520%25283%2529.pdf%3Bfilename%2A%3Dutf-8%27%27%25E9%2587%2591%25E5%25B1%25B1-%25E9%2599%2588%25E6%25B5%25A9%25E8%258D%25A3%2520%25281%2529%2520%25283%2529.pdf&response-expires=1800", "globalPadId":"300000000$BMhIpcSEKpOt"}' -c 50 -p 5 -d 30 -l -j > report.json                       
+```
