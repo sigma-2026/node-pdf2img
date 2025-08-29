@@ -227,12 +227,12 @@ class ExportImage {
                 if (!fs.existsSync(outputDir)) {
                     fs.mkdirSync(outputDir);
                 }
-                outputPath = `${outputDir}/page_${pageNum}.png`;
-                const image = canvasAndContext.canvas.toBuffer("image/png");
+                outputPath = `${outputDir}/page_${pageNum}.webp`;
+                const image = canvasAndContext.canvas.toBuffer("image/webp");
                 fs.writeFileSync(outputPath, image);
                 console.log(`✅ 页面 ${pageNum} 已保存至: ${outputPath}`);
             } else {
-                const image = canvasAndContext.canvas.toBuffer("image/png");
+                const image = canvasAndContext.canvas.toBuffer("image/webp");
                 bufferInfo = {
                     pageNum,
                     buffer: image,

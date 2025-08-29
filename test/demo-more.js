@@ -58,9 +58,9 @@ try {
         // const base64 = canvas.toDataURL();
         // console.log(`base64: ${base64}`);
         // 保存为 PNG 文件
-        const outputPath = `${outputDir}/page_${pageNum}.png`;
+        const outputPath = `${outputDir}/page_${pageNum}.webp`;
         // Convert the canvas to an image buffer.
-        const image = canvasAndContext.canvas.toBuffer("image/png");
+        const image = canvasAndContext.canvas.toBuffer("image/webp");
         console.log(`buffer: ${image.length}`);
         fs.writeFileSync(outputPath, image);
         // Release page resources.

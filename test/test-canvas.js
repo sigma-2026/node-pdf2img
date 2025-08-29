@@ -17,8 +17,8 @@ async function testCanvas(outputDir = './output') {
     // const base64 = canvas.toDataURL();
     // console.log(`base64: ${base64}`);
     // 保存为 PNG 文件
-    const outputPath = `${outputDir}/test.png`;
-    const buffer = canvas.toBuffer('image/png', {
+    const outputPath = `${outputDir}/test.webp`;
+    const buffer = canvas.toBuffer('image/webp', {
         compressionLevel: 6,
         filters: canvas.PNG_FILTER_NONE
     });

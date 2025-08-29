@@ -24,9 +24,9 @@ export const uploadFiles = async ({ globalPadId, bufferArr }) => {
                 return {
                     Region: cosConfig.Region,
                     Bucket: cosConfig.Bucket,
-                    Key: `${filePrefix}_${pageNum}.png`,
+                    Key: `${filePrefix}_${pageNum}.webp`,
                     Body: buffer,
-                    ContentType: 'image/png',
+                    ContentType: 'image/webp',
                 }
             }),
         });
