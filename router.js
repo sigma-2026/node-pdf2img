@@ -15,6 +15,7 @@ router.post('/pdf2img', async (req, res) => {
       message: 'URL is required',
     });
   }
+  console.log('url:', url);
 
   if (!globalPadId) {
     console.log('无 globalPadId 拦截');

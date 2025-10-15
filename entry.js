@@ -77,7 +77,7 @@ EnvBuilder.injectExtraEnv();
 // 获取环境变量字符串
 const extraEnvStr = EnvBuilder.getExtraEnvStr();
 const name = `--name "prod-pdf2img-server" `;         // 进程命名
-const max = "--instances 3";                 // 按CPU核心数最大化进程
+const max = "--instances 1";                 // 按CPU核心数最大化进程
 const memmory = `--max-memory-restart "1G"`; // 内存超1GB自动重启
 const cron = `--cron "0 4 * * *"`; // 每日UTC 04:00定时重启
 const timezone = `--env TZ=UTC`; // 强制使用UTC时区

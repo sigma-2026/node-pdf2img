@@ -62,9 +62,7 @@ process.on('unhandledRejection', (reason) => {
 
 config();
 const app = express();
-const instanceId = parseInt(process.env.NODE_APP_INSTANCE || "0");
-console.log('instanceId', instanceId);
-const PORT = (Number(process.env.PORT) || 3000) + instanceId;
+const PORT = (Number(process.env.PORT) || 3000);
 
 // Middleware
 app.use(express.json());
