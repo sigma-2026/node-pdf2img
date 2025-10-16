@@ -299,8 +299,9 @@ class RangeLoader extends PDFDataRangeTransport {
     }
 
     async requestDataRange(start, end) {
-        console.log(`[分片加载] [长度：${end - start}] ${start} - ${end}`);
-        const groups = this.getBatchGroups(start, end, this.getDynamicChunkSize());
+        const realEnd = end - 1;
+        console.log(`[分片加载] [长度：${realEnd - start}] ${start} - ${realEnd}`);
+        const groups = this.getBatchGroups(start, realEnd, this.getDynamicChunkSize());
         const datas = await Promise.all(
             groups.map(([eachStart, eachEnd]) => {
                 const result = this.getDataByRangeLimit({ start: eachStart, end: eachEnd });

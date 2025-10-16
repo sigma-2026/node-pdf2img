@@ -24,6 +24,7 @@ router.post('/pdf2img', async (req, res) => {
       message: 'globalPadId is required',
     });
   }
+  console.log('globalPadId:', globalPadId);
 
   try {
     const exportImage = new ExportImage({ globalPadId });
