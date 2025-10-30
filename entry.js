@@ -64,10 +64,11 @@ class EnvBuilder {
 
 const baseCommand = [
   'pm2 delete all || true',
-  'pm2 set pm2-logrotate:max_size 100M',
-  'pm2 set pm2-logrotate:retain 5',
+  'pm2 set pm2-logrotate:max_size 200M',
+  'pm2 set pm2-logrotate:retain 10',
   'pm2 set pm2-logrotate:compress true',
   'pm2 set pm2-logrotate:workerInterval 120',
+  'pm2 set pm2-logrotate:dateFormat YYYY-MM-DD',
   'pm2 set pm2-logrotate:rotateInterval 0 0 * * *',
   'pm2 set pm2-logrotate:TZ Asia/Shanghai',
 ].join(' && ');
@@ -81,8 +82,8 @@ const max = "--instances 1";                 // 按CPU核心数最大化进程
 const memmory = `--max-memory-restart "1G"`; // 内存超1GB自动重启
 const cron = `--cron "0 4 * * *"`; // 每日UTC 04:00定时重启
 const timezone = `--env TZ=UTC`; // 强制使用UTC时区
-const logger = `--output /root/.pm2/logs/pdf2img-output.log`;
-const errorLogger = `--error /root/.pm2/logs/pdf2img-error.log`;
+const logger = `--output /root/.pm2/logs/pdf2img.log`;
+const errorLogger = `--error /root/.pm2/logs/pdf2img.log`;
 
 const stableStr = `${name} ${max} ${memmory} ${cron} ${timezone} ${logger} ${errorLogger}`;
 const localCommand = `${baseCommand} && ${extraEnvStr} pm2 start app.js ${stableStr}`;
