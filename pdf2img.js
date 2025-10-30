@@ -42,9 +42,8 @@ class ExportImage {
         this.pdfPath = pdfPath;
         const CMAP_URL = path.join(
             __dirname,
-            'node_modules/pdfjs-dist/build/cmaps/'
+            'node_modules/pdfjs-dist/cmaps/'
         );
-        const CMAP_PACKED = true;
 
         const STANDARD_FONT_DATA_URL =
             path.join(
@@ -62,13 +61,13 @@ class ExportImage {
         const rangeLoader = new RangeLoader(this.pdfSize, initialData, this.pdfPath, EACH_CHUNK_SIZE);
         // 再分页加载
         const loadingTask = getDocument({
-            // url: pdfPath,
             cMapUrl: CMAP_URL,
-            cMapPacked: CMAP_PACKED,
+            cMapPacked: true,
             standardFontDataUrl: STANDARD_FONT_DATA_URL,
             rangeChunkSize: EACH_CHUNK_SIZE, // 分片大小 1MB
             disableAutoFetch: true, // 关闭自动全量下载
             range: rangeLoader,
+            verbosity: 5, // 日志等级
         });
         console.log("getDocument");
         try {
