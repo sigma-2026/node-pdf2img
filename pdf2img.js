@@ -13,7 +13,7 @@ const EACH_SMALL_CHUNK_SIZE = 256 * 1024;
 // 初始数据长度
 const INITIAL_DATA_LENGTH = 10 * 1024;
 // 不传 pages 参数时候默认截图页数
-const DEFAULT_PAGE_NUM = 10;
+const DEFAULT_PAGE_NUM = 6;
 
 // 获取当前模块路径
 const __filename = fileURLToPath(import.meta.url);
