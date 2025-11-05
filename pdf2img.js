@@ -12,6 +12,9 @@ const EACH_CHUNK_SIZE = 1024 * 1024;
 const EACH_SMALL_CHUNK_SIZE = 256 * 1024;
 // 初始数据长度
 const INITIAL_DATA_LENGTH = 10 * 1024;
+// 不传 pages 参数时候默认截图页数
+const DEFAULT_PAGE_NUM = 10;
+
 // 获取当前模块路径
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -117,8 +120,8 @@ class ExportImage {
             pages = Array.from({ length: numPages }, (_, i) => i + 1);
             console.log("全量截图");
         } else if (!pages) {
-            pages = Array.from({ length: Math.min(numPages, 3) }, (_, i) => i + 1);
-            console.log("前3页截图");
+            pages = Array.from({ length: Math.min(numPages, DEFAULT_PAGE_NUM) }, (_, i) => i + 1);
+            console.log(`对前${DEFAULT_PAGE_NUM}页进行截图`);
         } else {
             //  去重
             pages = [...new Set(pages)];
