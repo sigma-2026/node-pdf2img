@@ -82,8 +82,8 @@ const max = "--instances 1";                 // 按CPU核心数最大化进程
 const memmory = `--max-memory-restart "1G"`; // 内存超1GB自动重启
 const cron = `--cron "0 4 * * *"`; // 每日UTC 04:00定时重启
 const timezone = `--env TZ=UTC`; // 强制使用UTC时区
-const logger = `--output /root/.pm2/logs/pdf2img.log`;
-const errorLogger = `--error /root/.pm2/logs/pdf2img.log`;
+const logger = `--output /usr/src/app/pm2/logs/pdf2img.log`;
+const errorLogger = `--error /usr/src/app/pm2/logs/pdf2img.log`;
 
 const stableStr = `${name} ${max} ${memmory} ${cron} ${timezone} ${logger} ${errorLogger}`;
 const localCommand = `${baseCommand} && ${extraEnvStr} pm2 start app.js ${stableStr}`;
