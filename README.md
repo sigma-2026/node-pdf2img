@@ -105,16 +105,18 @@ sudo docker push csighub.tencentyun.com/pdf-developer/pdf2img:[tag]
 
 ```
 // 运行
-sudo docker run -d --name my-container -p 3000-3002:3000-3002 pdf2img:202508272112
+sudo docker run -d --name my-container -p 3000:3000 pdf2img:202508272112
 // 停止
 sudo docker stop my-container
 // 移除
 sudo docker remove my-container
 // 查看docker内存占用
-docker stats my-container
+sudo docker stats my-container
 // 查看docker日志
-docker logs my-container
-
+sudo docker logs my-container
+// 查看运行在容器内的日记
+sudo docker exec -it my-container /bin/sh
+cd pm2/logs
 ```
 
 # 压测
