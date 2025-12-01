@@ -17,7 +17,7 @@
   "dependencies": {
     "@mswjs/interceptors": "^0.39.6",
     "@tencent/ssm-sdk-nodejs": "^1.0.8",
-    "cos-nodejs-sdk-v5": "^2.16.0-beta.6",
+    "cos-nodejs-sdk-v5": "^2.14.6",
     "dotenv": "^16.0.3",
     "express": "^4.18.2",
     "nodemon": "^2.0.22",
