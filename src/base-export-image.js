@@ -4,6 +4,9 @@ import fetch from 'node-fetch';
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { RangeLoader, EACH_CHUNK_SIZE, INITIAL_DATA_LENGTH } from './range-loader.js';
 
+// 并行渲染配置
+const PARALLEL_RENDER = process.env.PARALLEL_RENDER !== 'false'; // 默认启用
+
 // 获取当前模块路径
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -29,6 +32,7 @@ class BaseExportImage {
     pdfSize = 0;
     pdfPath = '';
     globalPadId = '';
+    pdfData = null; // 存储完整PDF数据用于并行渲染
     
     constructor({ globalPadId }) {
         this.globalPadId = globalPadId;
@@ -55,25 +59,52 @@ class BaseExportImage {
                 'node_modules/pdfjs-dist/standard_fonts/'
             );
         
-        // 先拿首片数据 10KB
-        let initialData;
-        try {
-            initialData = await this.generateInitDataPromise();
-        } catch (error) {
-            throw new Error(error);
-        }
+        // 判断是否需要并行渲染（多页且子类支持）
+        const needParallel = PARALLEL_RENDER && typeof this.renderPagesParallel === 'function';
+        
+        let loadingTask;
+        if (needParallel) {
+            // 并行模式：下载完整PDF数据
+            console.log('[并行模式] 下载完整PDF数据');
+            const response = await fetch(this.pdfPath);
+            if (!response.ok) {
+                throw new Error(`下载PDF失败: ${response.status} ${response.statusText}`);
+            }
+            const arrayBuffer = await response.arrayBuffer();
+            // 使用Buffer存储，避免ArrayBuffer被分离
+            this.pdfData = Buffer.from(arrayBuffer);
+            this.pdfSize = this.pdfData.byteLength;
+            console.log(`[并行模式] PDF下载完成，大小: ${(this.pdfSize / 1024).toFixed(2)}KB`);
+            
+            loadingTask = getDocument({
+                data: new Uint8Array(this.pdfData),
+                cMapUrl: CMAP_URL,
+                cMapPacked: true,
+                standardFontDataUrl: STANDARD_FONT_DATA_URL,
+                verbosity: undefined,
+            });
+        } else {
+            // 串行模式：分片加载
+            // 先拿首片数据 10KB
+            let initialData;
+            try {
+                initialData = await this.generateInitDataPromise();
+            } catch (error) {
+                throw new Error(error);
+            }
 
-        const rangeLoader = new RangeLoader(this.pdfSize, initialData, this.pdfPath, EACH_CHUNK_SIZE);
-        // 再分页加载
-        const loadingTask = getDocument({
-            cMapUrl: CMAP_URL,
-            cMapPacked: true,
-            standardFontDataUrl: STANDARD_FONT_DATA_URL,
-            rangeChunkSize: EACH_CHUNK_SIZE, // 分片大小 1MB
-            disableAutoFetch: true, // 关闭自动全量下载
-            range: rangeLoader,
-            verbosity: undefined, // 日志等级由子类控制
-        });
+            const rangeLoader = new RangeLoader(this.pdfSize, initialData, this.pdfPath, EACH_CHUNK_SIZE);
+            // 再分页加载
+            loadingTask = getDocument({
+                cMapUrl: CMAP_URL,
+                cMapPacked: true,
+                standardFontDataUrl: STANDARD_FONT_DATA_URL,
+                rangeChunkSize: EACH_CHUNK_SIZE, // 分片大小 1MB
+                disableAutoFetch: true, // 关闭自动全量下载
+                range: rangeLoader,
+                verbosity: undefined, // 日志等级由子类控制
+            });
+        }
         
         let pdfDocument;
         try {
@@ -121,38 +152,53 @@ class BaseExportImage {
             console.log("部分截图 pages:", pages);
         }
 
-        // 逐页渲染为图片
-        const bufferArr = [];
-        for (let i = 0; i < pages.length; i++) {
-            const pageNum = pages[i];
-            console.log("正在截图pageNum", pageNum);
-            if (pageNum > numPages) {
-                console.log("pageNum > numPages, 跳过", { pageNum, numPages });
-                continue;
-            }
+        // 过滤超出范围的页码
+        const validPages = pages.filter(p => p <= numPages);
+        if (validPages.length < pages.length) {
+            console.log(`过滤掉 ${pages.length - validPages.length} 个超出范围的页码`);
+        }
 
-            const page = await pdfDocument.getPage(pageNum);
-            const bufferInfo = await this.renderAndSavePage(page, pageNum, pdfDocument);
-            
-            data.push(bufferInfo);
-            bufferArr.push(bufferInfo);
-
-            if (i === 0) {
+        // 判断是否使用并行渲染
+        const useParallel = PARALLEL_RENDER && validPages.length > 1 && this.pdfData && typeof this.renderPagesParallel === 'function';
+        
+        let bufferArr;
+        if (useParallel) {
+            console.log(`[并行模式] 渲染 ${validPages.length} 个页面`);
+            bufferArr = await this.renderPagesParallel(validPages, this.pdfData);
+            if (bufferArr.length > 0) {
                 console.log('🚀首张截图完成耗时', Date.now() - global.begin + 'ms');
             }
-            
-            // 每处理3页检查内存并触发GC（防内存泄漏）
-            if (pageNum % 3 === 0) {
-                const usage = process.memoryUsage();
-                const heapUsedMB = usage.heapUsed / 1024 / 1024;
-                if (heapUsedMB > 800 && global.gc) {
-                    console.log(`内存使用 ${heapUsedMB.toFixed(2)}MB，触发 GC`);
-                    global.gc();
-                    await new Promise(resolve => setTimeout(resolve, 10));
+        } else {
+            console.log(`[串行模式] 渲染 ${validPages.length} 个页面`);
+            bufferArr = [];
+            // 逐页渲染为图片
+            for (let i = 0; i < validPages.length; i++) {
+                const pageNum = validPages[i];
+                console.log("正在截图pageNum", pageNum);
+
+                const page = await pdfDocument.getPage(pageNum);
+                const bufferInfo = await this.renderAndSavePage(page, pageNum, pdfDocument);
+                
+                bufferArr.push(bufferInfo);
+
+                if (i === 0) {
+                    console.log('🚀首张截图完成耗时', Date.now() - global.begin + 'ms');
+                }
+                
+                // 每处理3页检查内存并触发GC（防内存泄漏）
+                if (pageNum % 3 === 0) {
+                    const usage = process.memoryUsage();
+                    const heapUsedMB = usage.heapUsed / 1024 / 1024;
+                    if (heapUsedMB > 800 && global.gc) {
+                        console.log(`内存使用 ${heapUsedMB.toFixed(2)}MB，触发 GC`);
+                        global.gc();
+                        await new Promise(resolve => setTimeout(resolve, 10));
+                    }
                 }
             }
         }
-        return { bufferArr, data };
+        
+        return { bufferArr, data: bufferArr };
     }
 
     /**

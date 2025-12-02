@@ -1,5 +1,6 @@
 import { spawn, execSync } from 'child_process';
 import { readFileSync } from 'fs';
+import os from 'os';
 
 /**
  * 环境变量生成
@@ -62,14 +63,24 @@ class EnvBuilder {
   }
 }
 
+// 获取 CPU 核心数，用于 cluster 模式
+const cpuCount = os.cpus().length;
+console.log(`[run-pm2] 检测到 ${cpuCount} 个 CPU 核心`);
+
+// 日志保留配置说明：
+// - retain: 每个日志文件保留的轮转版本数量
+// - rotateInterval: 每天凌晨执行轮转
+// - 结合 retain 7 + 每天轮转 = 约保留 7 天日志
+const LOG_RETAIN_COUNT = 7;  // 保留最近7个轮转版本（配合每天轮转，约等于7天日志）
+
 const baseCommand = [
   'pm2 delete all || true',
   'pm2 set pm2-logrotate:max_size 200M',
-  'pm2 set pm2-logrotate:retain 10',
+  `pm2 set pm2-logrotate:retain ${LOG_RETAIN_COUNT}`,     // 每个日志文件保留的轮转版本数
   'pm2 set pm2-logrotate:compress true',
   'pm2 set pm2-logrotate:workerInterval 120',
   'pm2 set pm2-logrotate:dateFormat YYYY-MM-DD',
-  'pm2 set pm2-logrotate:rotateInterval 0 0 * * *',
+  'pm2 set pm2-logrotate:rotateInterval 0 0 * * *',       // 每天凌晨轮转
   'pm2 set pm2-logrotate:TZ Asia/Shanghai',
 ].join(' && ');
 
@@ -77,19 +88,25 @@ const baseCommand = [
 EnvBuilder.injectExtraEnv();
 // 获取环境变量字符串
 const extraEnvStr = EnvBuilder.getExtraEnvStr();
-const name = `--name "prod-pdf2img-server" `;         // 进程命名
-const max = "--instances 1";                 // 按CPU核心数最大化进程
-const memmory = `--max-memory-restart "1G"`; // 内存超1GB自动重启
-const cron = `--cron "0 4 * * *"`; // 每日UTC 04:00定时重启
-const timezone = `--env TZ=UTC`; // 强制使用UTC时区
-const logger = `--output /usr/src/app/pm2/logs/pdf2img.log`;
-const errorLogger = `--error /usr/src/app/pm2/logs/pdf2img.log`;
 
-const stableStr = `${name} ${max} ${memmory} ${cron} ${timezone} ${logger} ${errorLogger}`;
+// PM2 Cluster 模式配置
+// 注意：使用 -i <instances> 参数时，PM2 会自动启用 cluster 模式
+// 某些高级配置（如 merge_logs, listen_timeout, kill_timeout）需要通过配置文件设置，命令行不支持
+const name = `--name "prod-pdf2img-server"`;             // 进程命名
+const instances = `-i max`;                              // cluster 模式：使用所有 CPU 核心（也可指定数字如 -i 4）
+const memmory = `--max-memory-restart 1G`;               // 内存超1GB自动重启
+const cron = `--cron "0 4 * * *"`;                       // 每日UTC 04:00定时重启
+const outLog = `-o /usr/src/app/pm2/logs/pdf2img.log`;  // 标准输出日志
+const errLog = `-e /usr/src/app/pm2/logs/pdf2img.log`;  // 错误输出日志
+
+// 组合稳定运行参数（cluster 模式）
+const stableStr = `${name} ${instances} ${memmory} ${cron} ${outLog} ${errLog}`;
+
 const localCommand = `${baseCommand} && ${extraEnvStr} pm2 start app.js ${stableStr}`;
 const dockerCommand = `${baseCommand} && ${extraEnvStr} pm2-runtime start app.js ${stableStr}`;
 
 const command = process.env.NODE_ENV ? localCommand : dockerCommand;
+console.log('[run-pm2] 启动模式: PM2 Cluster');
 console.log('[run-pm2] exec command:', command);
 
 const child = spawn(command, {
