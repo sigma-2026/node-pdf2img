@@ -1,5 +1,5 @@
 import express from 'express';
-import { ExportImage } from './pdf2img.js';
+import { createExportImage } from './pdf2img.js';
 import { parseJsonParam, isValidUrl } from './utils.js';
 
 const router = express.Router();
@@ -98,16 +98,15 @@ router.post('/pdf2img', async (req, res) => {
   }
   console.log('触发接口:/api/pdf2img 请求参数:', { url, globalPadId });
 
-    let exportImage;
-    try {
-        exportImage = new ExportImage({ globalPadId });
-        const pages = parseJsonParam(req.body.pages);
-
-        // 验证 pages 参数
+  let exportImage;
+  try {
+    exportImage = await createExportImage({ globalPadId });
+    const pages = parseJsonParam(req.body.pages);
+        // 验证传入的 pages 参数
         if (pages && pages !== 'all' && !Array.isArray(pages)) {
             return res.status(400).send({
                 code: 400,
-                message: 'pages must be an array or "all"',
+                message: 'pages must be an Array or String as "all"',
             });
         }
         const data = await exportImage.pdfToImage({

@@ -30,9 +30,73 @@ npm run pm2
 
 # 资源管理
 
-## ExportImage 类生命周期
+## 类架构设计
 
-`ExportImage` 类在每次请求时都会创建新实例，接口返回后会自动清理资源：
+项目采用工厂模式，根据环境自动选择对应的实现类，每个类都位于独立的文件中：
+
+### 文件结构
+```
+src/
+├── base-export-image.js    # BaseExportImage基类
+├── dev-export-image.js     # DevExportImage开发环境类
+├── prod-export-image.js    # ProdExportImage生产环境类
+├── pdf2img.js              # 工厂函数和导出入口
+└── ...其他文件
+```
+
+### 基类：BaseExportImage (base-export-image.js)
+- 包含PDF解析、分页、内存管理等核心逻辑
+- 定义抽象方法供子类实现
+
+### 开发环境：DevExportImage (dev-export-image.js)
+- 将图片保存到本地文件系统
+- 输出路径：`/tmp/pdf2img/{globalPadId}/`
+- 返回本地文件路径信息
+
+### 生产环境：ProdExportImage (prod-export-image.js)
+- 将图片上传到腾讯云COS
+- 返回COS文件路径信息
+
+### 工厂函数：createExportImage() (pdf2img.js)
+- 根据 `NODE_ENV` 环境变量自动选择实现类
+- 开发环境：`NODE_ENV=dev` → DevExportImage
+- 生产环境：其他值 → ProdExportImage
+
+### 使用方式
+```javascript
+// 导入工厂函数
+import { createExportImage } from './src/pdf2img.js';
+
+// 创建实例（自动根据环境选择实现）
+const exportImage = await createExportImage({ globalPadId: 'doc-123' });
+
+// 使用统一的接口
+const result = await exportImage.pdfToImage({
+    pdfPath: 'https://example.com/document.pdf',
+    pages: 'all'
+});
+```
+
+### 新的文件结构
+```
+src/
+├── base-export-image.js    # BaseExportImage基类
+├── dev-export-image.js     # DevExportImage开发环境类
+├── prod-export-image.js    # ProdExportImage生产环境类
+├── pdf2img.js              # 工厂函数入口
+├── utils.js                 # 工具函数
+└── ...其他文件
+```
+
+### 特点
+- **职责分离**：每个类有明确的职责，避免逻辑混淆
+- **环境隔离**：开发环境和生产环境的实现完全分离
+- **易于扩展**：可以轻松添加新的环境实现
+- **异步工厂**：使用动态导入避免循环依赖问题
+
+## 类生命周期管理
+
+每个实例在请求时创建，接口返回后自动清理资源：
 
 ### 自动清理的资源
 - ✅ PDF 文档对象 (`pdfDocument.destroy()`)

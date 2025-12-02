@@ -14,7 +14,6 @@ const run = async () => {
             pdfPath: workerData.url,
             outputDir: workerData.outputDir,
             pages: workerData.pages,
-            screen: workerData.screen,
         });
         // 任务成功，通过 postMessage 将结果返回给主线程
         parentPort.postMessage({ status: 'done', data });

@@ -1,6 +1,6 @@
 import path from "path";
 import fs from "fs";
-import { ExportImage } from "./pdf2img.js";
+import { createExportImage } from "./pdf2img.js";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -70,12 +70,11 @@ export function registerTestLocalRoute(app, PORT) {
     let exportImage;
     try {
         // 3. 实例化并调用核心服务
-        exportImage = new ExportImage({ globalPadId });
+        exportImage = await createExportImage({ globalPadId });
         
         // 您可以在此自定义测试参数, pages: "all" 表示全量截图, 也可以是页码数组 [1, 3]
         const data = await exportImage.pdfToImage({
             pdfPath: pdfUrl,
-            outputDir: outputDir,
             pages: "all",
         });
 

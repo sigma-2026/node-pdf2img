@@ -3,6 +3,7 @@ import apiRouter from "./src/router.js";
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
+import { IS_DEV } from "./src/env.js";
 
 // 获取当前模块路径
 const __filename = fileURLToPath(import.meta.url);
