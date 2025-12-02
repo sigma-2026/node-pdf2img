@@ -22,6 +22,27 @@ npm install pm2 -g
 npm run pm2
 ```
 
+# 请求示例：
+
+<img src='./static/demo.png'>
+
+# docker 镜像(devcloud)
+
+## 自动打镜像脚本
+```
+npm run docker:push
+```
+
+## 镜像发布前需要确认的事情(TODO: 自动化脚本)
+
+1、✅集成测试全部通过
+```
+npm run test:integration
+```
+
+2、✅镜像验证
+
+
 # 特性
 
 * 支持数据分片，拆4个子片，并发请求
@@ -140,31 +161,84 @@ curl http://localhost:3000/test-local
 - 截图输出目录默认为 `output/`，可通过环境变量 `OUTPUT_DIR` 自定义
 - **生产环境部署时，`src/test-local-route.js` 不会被打包（已在 `.dockerignore` 中排除）**
 
-# TODO
 
-1、pkg
+# 测试
 
-2、pm2 部署
+## 运行所有测试
+在发布镜像前，**必须**运行测试确保所有功能正常：
 
+```bash
+# 运行API集成测试（推荐）
+npm test
 
-# 请求示例：
+# 运行单元测试
+npm run test:unit
 
-<img src='./static/demo.png'>
-
-
-# docker 镜像(devcloud)
-
-## 自动打镜像脚本
+# 运行集成测试
+npm run test:integration
 ```
+
+## 单元测试
+测试工具函数和独立模块：
+
+```bash
+npm run test:unit
+```
+
+单元测试覆盖：
+- ✅ URL验证函数 (isValidUrl)
+- ✅ JSON参数解析函数 (parseJsonParam)
+- ✅ 边界情况和异常处理
+
+测试结果示例：
+```
+Test Suites: 1 passed, 1 total
+Tests:       12 passed, 12 total
+```
+
+## API集成测试
+真实的API接口测试：
+
+```bash
+npm test
+# 或
+npm run test:integration
+```
+
+集成测试包括：
+- ✅ 参数验证测试（缺少参数、无效格式等）
+- ✅ 成功场景测试（默认页码、all参数、页码数组）
+- ✅ 响应格式验证
+- ✅ 性能测试（单页转换 < 30秒）
+
+测试结果示例：
+```
+============================================================
+PDF2IMG API 集成测试
+============================================================
+
+测试结果汇总:
+总计: 39 个测试
+通过: 39
+失败: 0
+============================================================
+```
+
+### 详细测试文档
+查看 [TEST_GUIDE.md](./TEST_GUIDE.md) 了解更多测试细节。
+
+## 发布前检查清单
+```bash
+# 1. 运行单元测试
+npm run test:unit
+
+# 2. 运行集成测试
+npm test
+
+# 3. 确保所有测试通过
+# 4. 构建并推送镜像
 npm run docker:push
 ```
-
-## 镜像发布前需要确认的事情(TODO: 自动化脚本)
-
-1、✅单测全部通过
-
-2、✅镜像验证
-
 
 ## mirrors.tencent.com
 [仓库地址](https://mirrors.tencent.com/#/private/docker/detail?project_name=tdocs-pdf&repo_name=pdf2img)
