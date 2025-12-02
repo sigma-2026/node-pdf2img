@@ -6,7 +6,7 @@ import { BaseExportImage } from './base-export-image.js';
  */
 class DevExportImage extends BaseExportImage {
     /** dev 环境的输出目录 */
-    outputDir = process.env.OUTPUT_DIR || '/tmp/pdf2img';
+    outputDir = process.env.OUTPUT_DIR || './output';
 
     /**
      * 渲染并保存单个PDF页面到本地文件
@@ -36,11 +36,11 @@ class DevExportImage extends BaseExportImage {
                 fs.mkdirSync(this.outputDir, { recursive: true });
             }
             
-            const filePrefix = `${this.outputDir}/${this.globalPadId}`;
+            const filePrefix = `${this.outputDir}`;
             if (!fs.existsSync(filePrefix)) {
                 fs.mkdirSync(filePrefix, { recursive: true });
             }
-            
+            console.log('🔨目录', fs.existsSync(filePrefix));
             outputPath = `${filePrefix}/page_${pageNum}.webp`;
             const image = canvasAndContext.canvas.toBuffer("image/webp");
             fs.writeFileSync(outputPath, image);

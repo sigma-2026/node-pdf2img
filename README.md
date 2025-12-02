@@ -38,9 +38,17 @@ npm run docker:push
 1、✅集成测试全部通过
 ```
 npm run test:integration
+
+2、✅本地生图验证
+```
+rm -rf ./output
+npm run dev
+curl 'http://localhost:3000/test-local'
+ls ./output
 ```
 
-2、✅镜像验证
+3、✅镜像验证
+```
 
 
 # 特性

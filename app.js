@@ -4,6 +4,7 @@ import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
 import { IS_DEV } from "./src/env.js";
+import { registerTestLocalRoute } from './src/test-local-route.js';
 
 // 获取当前模块路径
 const __filename = fileURLToPath(import.meta.url);
@@ -50,12 +51,8 @@ app.use("/static", (req, res, next) => {
 
 // 仅在开发环境加载测试路由（生产环境不打包）
 if (IS_DEV) {
-    import('./src/test-local-route.js').then(({ registerTestLocalRoute }) => {
-        registerTestLocalRoute(app, PORT);
-        console.log('✅ 开发环境：已加载 /test-local 测试接口');
-    }).catch(err => {
-        console.warn('⚠️  加载测试路由失败:', err.message);
-    });
+    registerTestLocalRoute(app, PORT);
+    console.log('✅ 开发环境：已加载 /test-local 测试接口');
 }
 
 // Routes
