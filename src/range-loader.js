@@ -15,7 +15,7 @@ export class RangeLoader extends PDFDataRangeTransport {
 
     async requestDataRange(start, end) {
         const realEnd = end - 1;
-        console.log(`[分片加载] [长度：${realEnd - start}] ${start} - ${realEnd}`);
+        // console.log(`[分片加载] [长度：${realEnd - start}] ${start} - ${realEnd}`);
         const groups = this.getBatchGroups(start, realEnd, this.getDynamicChunkSize());
         const datas = await Promise.all(
             groups.map(([eachStart, eachEnd]) => {
@@ -48,7 +48,7 @@ export class RangeLoader extends PDFDataRangeTransport {
     }
 
     async getDataByRangeLimit({ start, end, }) {
-        console.log(`[分片请求]${start} - ${end}`);
+        // console.log(`[分片请求]${start} - ${end}`);
         return await fetch(this.pdfPath, {
             headers: {
                 Range: `bytes=${start}-${end}`,
