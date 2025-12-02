@@ -9,4 +9,9 @@ dist
 coverage
 .vscode
 output
+test
 static
+tool
+test-local.js
+README.md
+latest.version
