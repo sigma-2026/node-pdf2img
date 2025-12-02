@@ -11,6 +11,39 @@ const __dirname = path.dirname(__filename);
  * 生产环境构建时不应包含此文件
  */
 export function registerTestLocalRoute(app, PORT) {
+    /**
+     * 本地测试接口 - 仅开发环境可用
+     * 
+     * @param {Object} req - 请求对象
+     * @param {Object} res - 响应对象
+     * @returns {Object} 测试结果
+     * @property {number} code - 状态码（200=成功，500=失败）
+     * @property {Object[]|null} data - 转换结果数据
+     * @property {string} data[].outputPath - 本地文件路径
+     * @property {number} data[].width - 图片宽度
+     * @property {number} data[].height - 图片高度
+     * @property {number} data[].pageNum - 页码
+     * @property {string} message - 响应消息
+     * 
+     * @example
+     * // 请求示例
+     * GET http://localhost:3000/test-local
+     * 
+     * @example
+     * // 成功响应示例
+     * {
+     *   "code": 200,
+     *   "data": [
+     *     {
+     *       "outputPath": "/tmp/pdf2img/local-test-123456/page_1.webp",
+     *       "width": 1584,
+     *       "height": 2244,
+     *       "pageNum": 1
+     *     }
+     *   ],
+     *   "message": "✅ 本地测试成功！截图已保存至 '/tmp/pdf2img' 目录。"
+     * }
+     */
     app.get("/test-local", async (req, res) => {
         global.begin = Date.now();
         console.log("触发本地测试接口: /test-local");

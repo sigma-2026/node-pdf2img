@@ -4,7 +4,67 @@ import { parseJsonParam, isValidUrl } from './utils.js';
 
 const router = express.Router();
 
-/** PDF转图片接口 */
+/**
+ * PDF转图片接口
+ * 
+ * @param {Object} req - 请求对象
+ * @param {Object} req.body - 请求体参数
+ * @param {string} req.body.url - PDF文件的URL地址（必需）
+ * @param {string} req.body.globalPadId - 全局标识符，用于文件上传和日志追踪（必需）
+ * @param {string|number[]} [req.body.pages] - 要转换的页码，支持以下格式：
+ *   - "all": 转换所有页面
+ *   - [1, 3, 5]: 转换指定页码数组
+ *   - 不传或null: 默认转换前6页
+ * 
+ * @param {Object} res - 响应对象
+ * @returns {Object} 响应数据
+ * @property {number} code - 状态码（200=成功，400=参数错误，500=服务器错误，502=网络错误）
+ * @property {Object[]|null} data - 转换结果数据
+ * @property {string} data[].cosKey - COS存储的文件路径（生产环境）
+ * @property {string} data[].outputPath - 本地文件路径（开发环境）
+ * @property {number} data[].width - 图片宽度
+ * @property {number} data[].height - 图片高度
+ * @property {number} data[].pageNum - 页码
+ * @property {string} message - 响应消息
+ * 
+ * @example
+ * // 请求示例
+ * {
+ *   "url": "https://example.com/document.pdf",
+ *   "globalPadId": "doc-123456",
+ *   "pages": "all"
+ * }
+ * 
+ * @example
+ * // 成功响应示例（生产环境）
+ * {
+ *   "code": 200,
+ *   "data": [
+ *     {
+ *       "cosKey": "/doc-123456/page_1.webp",
+ *       "width": 1584,
+ *       "height": 2244,
+ *       "pageNum": 1
+ *     }
+ *   ],
+ *   "message": "ok"
+ * }
+ * 
+ * @example
+ * // 成功响应示例（开发环境）
+ * {
+ *   "code": 200,
+ *   "data": [
+ *     {
+ *       "outputPath": "/tmp/pdf2img/doc-123456/page_1.webp",
+ *       "width": 1584,
+ *       "height": 2244,
+ *       "pageNum": 1
+ *     }
+ *   ],
+ *   "message": "ok"
+ * }
+ */
 router.post('/pdf2img', async (req, res) => {
   global.begin = Date.now();
   const url = req.body.url;
@@ -81,7 +141,36 @@ router.post('/pdf2img', async (req, res) => {
     }
 });
 
-/** 健康检查端点 */
+/**
+ * 健康检查端点
+ * 
+ * @param {Object} req - 请求对象
+ * @param {Object} res - 响应对象
+ * @returns {Object} 健康状态信息
+ * @property {number} code - 状态码（200=正常）
+ * @property {Object} data - 健康数据
+ * @property {string} data.status - 服务状态（"ok"=正常）
+ * @property {number} data.uptime - 服务运行时间（秒）
+ * @property {Object} data.memory - 内存使用情况
+ * @property {string} data.memory.heapUsed - 堆内存使用量
+ * @property {string} data.memory.heapTotal - 堆内存总量
+ * @property {string} message - 响应消息
+ * 
+ * @example
+ * // 响应示例
+ * {
+ *   "code": 200,
+ *   "data": {
+ *     "status": "ok",
+ *     "uptime": 86400,
+ *     "memory": {
+ *       "heapUsed": "45.23MB",
+ *       "heapTotal": "128.00MB"
+ *     }
+ *   },
+ *   "message": "Service is healthy"
+ * }
+ */
 router.get('/health', (req, res) => {
   const memoryUsage = process.memoryUsage();
   res.send({
