@@ -26,6 +26,29 @@ npm run pm2
 
 * 支持数据分片，拆4个子片，并发请求
 * 接入cos桶
+* 自动资源管理，避免内存泄漏
+
+# 资源管理
+
+## ExportImage 类生命周期
+
+`ExportImage` 类在每次请求时都会创建新实例，接口返回后会自动清理资源：
+
+### 自动清理的资源
+- ✅ PDF 文档对象 (`pdfDocument.destroy()`)
+- ✅ Canvas 资源 (`canvasFactory.reset()`)
+- ✅ PDF 页面资源 (`page.cleanup()`)
+- ✅ 内存监控和GC触发
+
+### 手动清理（可选）
+通过调用 `exportImage.destroy()` 可以手动清理实例资源，但这不是必需的，因为：
+- 主接口 (`/api/pdf2img`) 已在 finally 块中自动清理
+- 测试接口 (`/test-local`) 同样有自动清理机制
+
+### 内存管理
+- 每处理3页检查内存使用情况
+- 内存超过800MB时自动触发GC
+- 支持手动GC（通过 `global.gc`）
 
 # 本地测试
 

@@ -100,12 +100,12 @@ class ExportImage {
         } finally {
             // 确保 PDF 文档被清理
             try {
-                const pdfDocument = await loadingTask.promise;
                 if (pdfDocument) {
                     await pdfDocument.destroy();
                 }
             } catch (e) {
                 // 忽略清理错误
+                console.warn('PDF文档清理失败:', e.message);
             }
         }
 
@@ -254,6 +254,16 @@ class ExportImage {
                 return response.arrayBuffer();
             });
     };
+
+    /**
+     * 手动销毁实例，清理所有资源
+     * 建议在接口返回后调用，避免内存泄漏
+     */
+    async destroy() {
+        console.log(`[${this.globalPadId}] 清理ExportImage实例资源`);
+        // 这里可以添加其他需要清理的资源
+        // 目前主要的资源清理已经在pdfToImage的finally块中完成
+    }
 }
 
 export { ExportImage };

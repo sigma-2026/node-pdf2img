@@ -34,31 +34,40 @@ export function registerTestLocalRoute(app, PORT) {
         console.log(`测试用的 globalPadId: ${globalPadId}`);
         console.log(`截图输出目录: ${outputDir}`);
 
-        try {
-            // 3. 实例化并调用核心服务
-            const exportImage = new ExportImage({ globalPadId });
-            
-            // 您可以在此自定义测试参数, pages: "all" 表示全量截图, 也可以是页码数组 [1, 3]
-            const data = await exportImage.pdfToImage({
-                pdfPath: pdfUrl,
-                outputDir: outputDir,
-                pages: "all",
-            });
+    let exportImage;
+    try {
+        // 3. 实例化并调用核心服务
+        exportImage = new ExportImage({ globalPadId });
+        
+        // 您可以在此自定义测试参数, pages: "all" 表示全量截图, 也可以是页码数组 [1, 3]
+        const data = await exportImage.pdfToImage({
+            pdfPath: pdfUrl,
+            outputDir: outputDir,
+            pages: "all",
+        });
 
-            const successMessage = `✅ 本地测试成功！截图已保存至 '${outputDir}' 目录。`;
-            console.log(successMessage);
-            res.send({
-                code: 200,
-                data: data,
-                message: successMessage,
-            });
-        } catch (error) {
-            console.error("❌ 本地测试时发生错误:", error);
-            res.status(500).send({
-                code: 500,
-                data: null,
-                message: error.message,
-            });
+        const successMessage = `✅ 本地测试成功！截图已保存至 '${outputDir}' 目录。`;
+        console.log(successMessage);
+        res.send({
+            code: 200,
+            data: data,
+            message: successMessage,
+        });
+    } catch (error) {
+        console.error("❌ 本地测试时发生错误:", error);
+        res.status(500).send({
+            code: 500,
+            data: null,
+            message: error.message,
+        });
+    } finally {
+        // 确保 ExportImage 实例被清理
+        if (exportImage) {
+            try {
+                await exportImage.destroy();
+            } catch (destroyError) {
+                console.warn('ExportImage实例清理失败:', destroyError.message);
+            }
         }
-    });
+    }    });
 }
