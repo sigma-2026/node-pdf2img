@@ -6,7 +6,6 @@ import COS from 'cos-nodejs-sdk-v5';
 export const getCosInstance = async () => {
     // 子账号和tag的信息
     const tagName = process.env.COS_SECRET_TAG;
-    console.log('tagName', tagName);
     try {
         const { rotated_credential: rotatedCredential } = await import('@tencent/ssm-sdk-nodejs');
         const profile = await rotatedCredential.LoadAccessKeyProfile();

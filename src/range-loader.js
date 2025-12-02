@@ -22,23 +22,19 @@ export class RangeLoader extends PDFDataRangeTransport {
                 const result = this.getDataByRangeLimit({ start: eachStart, end: eachEnd });
                 return result;
             }));
-        // console.log('datas', datas);
         const byteLength = datas.reduce((total, data) => total + data.byteLength, 0);
-        // console.log('byteLength', byteLength);
         const byteData = new Uint8Array(byteLength);
         let offset = 0;
         for (const data of datas) {
             byteData.set(new Uint8Array(data), offset);
             offset += data.byteLength;
         }
-        // console.log('byteData', byteData);
         this.onDataProgress(byteData.byteLength, this.pdfSize);
         this.onDataRange(start, byteData);
     }
 
     getBatchGroups(start, end, limitLength) {
         const count = Math.ceil((end - start) / limitLength);
-        console.log('并行片数', count);
         return (new Array(count).fill(0)
             .map((_, index) => {
                 const eachStart = index * limitLength + start;

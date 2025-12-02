@@ -1,26 +1,21 @@
 import { getCosInstance } from './cos.js';
 
 const cosConfig = {
-    Bucket: 'tencent-docs-1251316161',
-    Region: 'ap-guangzhou',
-    path: 'pdf2img',
+    Bucket: process.env.COS_BUCKET || 'tencent-docs-1251316161',
+    Region: process.env.COS_REGION || 'ap-guangzhou',
+    path: process.env.COS_PATH || 'pdf2img',
 };
 
 /**
  * 批量上传文件到 cos
  */
 export const uploadFiles = async ({ globalPadId, bufferArr }) => {
-    console.log('uploadFiles', globalPadId);
     try {
         const cos = await getCosInstance();
         const filePrefix = `${cosConfig.path}/${globalPadId}`;
-        console.log('filePrefix', filePrefix);
         const response = await cos.uploadFiles({
             files: bufferArr.map((one) => {
-                // console.log('one', one);
                 const { buffer, pageNum } = one;
-                // console.log('buffer', buffer);
-                // console.log('pageNum', pageNum);
                 return {
                     Region: cosConfig.Region,
                     Bucket: cosConfig.Bucket,
@@ -32,13 +27,13 @@ export const uploadFiles = async ({ globalPadId, bufferArr }) => {
         });
         const error = response.files.find(file => !!file.error);
         if (error) {
-            console.error?.('[uploadSvgFileTask] exist anyone fail', error);
+            console.error('[uploadFiles] exist anyone fail', error);
             throw error;
         }
-        console.info?.('[uploadSvgFileTask] success');
+        console.info('[uploadFiles] success');
         return response;
     } catch (err) {
-        console.error?.('[uploadSvgFileTask] error', err);
+        console.error('[uploadFiles] error', err);
         return undefined;
     }
 };

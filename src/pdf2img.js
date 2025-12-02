@@ -5,35 +5,45 @@ import fetch from 'node-fetch';
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { IS_DEV } from './env.js';
 import { uploadFiles } from './upload-file.js';
-import { RangeLoader, EACH_CHUNK_SIZE, EACH_SMALL_CHUNK_SIZE, INITIAL_DATA_LENGTH } from './range-loader.js';
+import { RangeLoader, EACH_CHUNK_SIZE, INITIAL_DATA_LENGTH } from './range-loader.js';
 
 // 获取当前模块路径
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+/**
+ * @typedef {Object} CaptureOptions
+ * @property {string} pdfPath - PDF文件路径
+ * @property {number[]|'all'|null} pages - 页码数组或'all'
+ */
+
+/**
+ * @typedef {Object} BufferInfo
+ * @property {number} pageNum - 页码
+ * @property {Buffer} buffer - 图片buffer
+ * @property {number} width - 图片宽度
+ * @property {number} height - 图片高度
+ */
+
 class ExportImage {
     pdfSize = 0;
     pdfPath = '';
     globalPadId = '';
+    /** dev 环境的输出目录 */
+    outputDir = process.env.OUTPUT_DIR;
     constructor({ globalPadId }) {
         this.globalPadId = globalPadId;
     }
 
     /**
      * pdf 转图片
-     * @param pdfPath pdf路径
-     * @param outputDir 输出目录(仅本地调试需要)
-     * @param pages 需要截图的页码, 不传则全量截图
+     * @param {CaptureOptions} options - 截图选项
+     * @returns {Promise<Array>} 返回图片信息数组
      */
     async pdfToImage({
         pdfPath,
-        outputDir,
         pages,
-        screen,
     }) {
-        // 运行在本地时候返回路径, 运行在服务器时候返回cos地址
-        let data = [];
-        console.log("pdfToImage");
         this.pdfPath = pdfPath;
         const CMAP_URL = path.join(
             __dirname,
@@ -62,28 +72,18 @@ class ExportImage {
             rangeChunkSize: EACH_CHUNK_SIZE, // 分片大小 1MB
             disableAutoFetch: true, // 关闭自动全量下载
             range: rangeLoader,
-            verbosity: 5, // 日志等级
+            verbosity: IS_DEV ? 5 : undefined, // 日志等级
         });
-        console.log("getDocument");
         try {
             const pdfDocument = await loadingTask.promise;
-            console.log("PDF document loaded.");
             const numPages = pdfDocument.numPages;
             console.log(`PDF 加载成功，共 ${numPages} 页`);
-            let bufferArr;
-            // 传递了 screen, 则自动分析截图几页
-            if (screen) {
-                ({ bufferArr, data } = await this.captureByScreen({ screen, numPages, pdfDocument, outputDir }));
-            } else {
-                // 不传 screen, 则用传递的 pages 参数来截图
-                ({ bufferArr, data } = await this.captureByPages({ pages, numPages, pdfDocument, outputDir }));
-            }
-
+            // 用传递的 pages 参数来截图
+            const { bufferArr, data } = await this.captureByPages({ pages, numPages, pdfDocument });
             // 上传
             if (!IS_DEV) {
-                console.log('开始上传cos', bufferArr.length, '个文件');
+                console.log('上传文件到 cos', bufferArr.length, '个文件');
                 const response = await uploadFiles({ globalPadId: this.globalPadId, bufferArr });
-                console.log('response.files', response.files);
                 response.files.forEach((file, index) => {
                     data.push({
                         cosKey: '/' + file.options.Key,
@@ -96,7 +96,17 @@ class ExportImage {
                 console.log('🚀本地全部截图完成耗时', Date.now() - global.begin + 'ms');
             }
         } catch (reason) {
-            throw new Error("截图处理失败:", reason);
+            throw new Error(`截图处理失败: ${reason}`);
+        } finally {
+            // 确保 PDF 文档被清理
+            try {
+                const pdfDocument = await loadingTask.promise;
+                if (pdfDocument) {
+                    await pdfDocument.destroy();
+                }
+            } catch (e) {
+                // 忽略清理错误
+            }
         }
 
         return data;
@@ -105,15 +115,15 @@ class ExportImage {
     /**
      * 根据页码截图
      */
-    async captureByPages({ pages, numPages, pdfDocument, outputDir }) {
+    async captureByPages({ pages, numPages, pdfDocument }) {
         const data = [];
 
         if (pages === 'all') {
             pages = Array.from({ length: numPages }, (_, i) => i + 1);
             console.log("全量截图");
         } else if (!pages) {
-            pages = Array.from({ length: Math.min(numPages, 3) }, (_, i) => i + 1);
-            console.log("前3页截图");
+            pages = Array.from({ length: 6 }, (_, i) => i + 1);
+            console.log("前6页截图");
         } else {
             //  去重
             pages = [...new Set(pages)];
@@ -141,60 +151,22 @@ class ExportImage {
             if (i === 0) {
                 console.log('🚀首张截图完成耗时', Date.now() - global.begin + 'ms');
             }
-            // 每处理3页强制GC（防内存泄漏）
-            if (pageNum % 3 === 0 && global.gc) {
-                global.gc();
-                await new Promise(resolve => setTimeout(resolve, 10));
-            }
-        }
-        return { bufferArr, data };
-    }
-
-    /**
-     * 根据视口截图
-     */
-    async captureByScreen({ screen, numPages, pdfDocument, outputDir }) {
-        const data = [];
-        console.log("screen分析截图", screen);
-        // 遍历分析
-        const bufferArr = [];
-        let totalHeight = 0;
-        const screenHeight = screen.height;
-        const screenWidth = screen.width;
-        for (let pageNum = 1; pageNum <= numPages; pageNum++) {
-            console.log("正在截图pageNum", pageNum);
-            console.log("当前totalHeight", totalHeight);
-            if (totalHeight >= screenHeight) {
-                break;
-            }
-            const page = await pdfDocument.getPage(pageNum);
-            const viewport = page.getViewport({ scale: 1.0 });
-            const pageHeight = viewport.height / viewport.width * screenWidth;
-            console.log("pageHeight", pageHeight);
-
-            const bufferInfo = await this.renderAndSavePage(page, pageNum, outputDir, pdfDocument);
-            if (IS_DEV) {
-                data.push(bufferInfo);
-            } else {
-                bufferArr.push(bufferInfo);
-            }
-
-            if (totalHeight === 0) {
-                console.log('🚀首张截图完成耗时', Date.now() - global.begin + 'ms');
-            }
-            totalHeight += pageHeight;
-            console.log("----------分割线------------");
-            // 每处理3页强制GC（防内存泄漏）
-            if (pageNum % 3 === 0 && global.gc) {
-                global.gc();
-                await new Promise(resolve => setTimeout(resolve, 10));
+            // 每处理3页检查内存并触发GC（防内存泄漏）
+            if (pageNum % 3 === 0) {
+                const usage = process.memoryUsage();
+                const heapUsedMB = usage.heapUsed / 1024 / 1024;
+                if (heapUsedMB > 800 && global.gc) {
+                    console.log(`内存使用 ${heapUsedMB.toFixed(2)}MB，触发 GC`);
+                    global.gc();
+                    await new Promise(resolve => setTimeout(resolve, 10));
+                }
             }
         }
         return { bufferArr, data };
     }
 
     // 渲染并保存单个PDF页面
-    async renderAndSavePage(page, pageNum, outputDir, pdfDocument) {
+    async renderAndSavePage(page, pageNum, pdfDocument) {
         let canvasAndContext;
         // 远程环境
         let bufferInfo = {};
@@ -218,10 +190,10 @@ class ExportImage {
 
             if (IS_DEV) {
                 // 本地环境确保输出目录存在
-                if (!fs.existsSync(outputDir)) {
-                    fs.mkdirSync(outputDir);
+                if (!fs.existsSync(this.outputDir)) {
+                    fs.mkdirSync(this.outputDir);
                 }
-                outputPath = `${outputDir}/page_${pageNum}.webp`;
+                outputPath = `${this.outputDir}/page_${pageNum}.webp`;
                 const image = canvasAndContext.canvas.toBuffer("image/webp");
                 fs.writeFileSync(outputPath, image);
                 console.log(`✅ 页面 ${pageNum} 已保存至: ${outputPath}`);

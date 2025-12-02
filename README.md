@@ -1,6 +1,4 @@
-# PDF to Image Converter
-
-A simple tool to convert PDF files to images.
+# PDF 生图服务
 
 ## Prerequisites
 - Node.js 20+
@@ -8,7 +6,7 @@ A simple tool to convert PDF files to images.
 
 ## Installation
 ```bash
-npm install
+pnpm i
 ```
 
 ## Running the App
@@ -16,16 +14,6 @@ npm install
 ### Without Docker
 ```bash
 npm start
-```
-
-### With Docker
-1. Build the Docker image:
-```bash
-docker build -t pdf2img .
-```
-2. Run the container:
-```bash
-docker run -p 3000:3000 pdf2img
 ```
 
 ### Using PM2 for Monitoring
@@ -39,6 +27,32 @@ npm run pm2
 * 支持数据分片，拆4个子片，并发请求
 * 接入cos桶
 
+# 本地测试
+
+## 测试接口说明
+项目提供了 `/test-local` 接口用于本地开发测试，**该接口仅在开发环境可用，不会打包到生产环境**。
+
+### 使用方法
+1. 设置环境变量：
+```bash
+export NODE_ENV=dev
+```
+
+2. 启动服务：
+```bash
+npm start
+```
+
+3. 访问测试接口：
+```bash
+curl http://localhost:3000/test-local
+```
+
+### 注意事项
+- 测试接口会自动使用 `static/1M.pdf` 作为测试文件
+- 截图输出目录默认为 `output/`，可通过环境变量 `OUTPUT_DIR` 自定义
+- **生产环境部署时，`src/test-local-route.js` 不会被打包（已在 `.dockerignore` 中排除）**
+
 # TODO
 
 1、pkg
@@ -48,11 +62,7 @@ npm run pm2
 
 # 请求示例：
 
-## 不带页码默认首页
-<img src='./image.png'>
-
-## 带页码多页
-<img src='./image1.png'>
+<img src='./static/demo.png'>
 
 
 # docker 镜像(devcloud)
@@ -61,6 +71,13 @@ npm run pm2
 ```
 npm run docker:push
 ```
+
+## 镜像发布前需要确认的事情(TODO: 自动化脚本)
+
+1、✅单测全部通过
+
+2、✅镜像验证
+
 
 ## mirrors.tencent.com
 [仓库地址](https://mirrors.tencent.com/#/private/docker/detail?project_name=tdocs-pdf&repo_name=pdf2img)

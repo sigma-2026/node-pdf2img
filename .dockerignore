@@ -9,4 +9,11 @@ dist
 coverage
 .vscode
 output
+test
 static
+tool
+
+# 测试文件 - 不打包到生产环境
+src/test-local-route.js
+test-local.js
+README.md

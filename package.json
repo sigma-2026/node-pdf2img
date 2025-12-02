@@ -7,6 +7,7 @@
     "start": "node app.js",
     "dev": "NODE_ENV=dev nodemon app.js",
     "pm2": "pm2 start app.js --no-daemon --env production",
+    "test": "node ./test-local.js",
     "docker:push": "node ./tool/exec-docker-push.js",
     "prod": "node entry.js"
   },
