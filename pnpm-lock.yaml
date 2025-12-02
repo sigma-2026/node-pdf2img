@@ -23,9 +23,6 @@ importers:
       express:
         specifier: ^4.18.2
         version: 4.21.2
-      node-fetch:
-        specifier: ^3.3.2
-        version: 3.3.2
       nodemon:
         specifier: ^2.0.22
         version: 2.0.22
@@ -38,6 +35,10 @@ importers:
       pm2-logrotate:
         specifier: ^2.7.0
         version: 2.7.0
+    devDependencies:
+      node-fetch:
+        specifier: ^3.3.2
+        version: 3.3.2
 
 packages:
 
