@@ -22,7 +22,7 @@ function getWorkerPool() {
             minThreads: 1,
             idleTimeout: 30000, // 30秒空闲超时
         });
-        console.log(`[Worker Pool] 初始化完成，最大线程数: ${WORKER_THREADS}`);
+        console.log(`[Worker Pool] 初始化完成，最大Worker线程数: ${WORKER_THREADS}`);
     }
     return workerPool;
 }

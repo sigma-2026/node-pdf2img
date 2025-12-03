@@ -48,89 +48,140 @@ class BaseExportImage {
         pages,
     }) {
         this.pdfPath = pdfPath;
-        const CMAP_URL = path.join(
-            __dirname,
-            'node_modules/pdfjs-dist/cmaps/'
-        );
-
-        const STANDARD_FONT_DATA_URL =
-            path.join(
-                __dirname,
-                'node_modules/pdfjs-dist/standard_fonts/'
-            );
         
-        // 判断是否需要并行渲染（多页且子类支持）
+        try {
+            // 1. 初始化PDF加载配置
+            const { CMAP_URL, STANDARD_FONT_DATA_URL } = this.getPdfJsConfig();
+            
+            // 2. 获取初始数据
+            const initialData = await this.generateInitDataPromise();
+            
+            // 3. 创建PDF加载任务
+            const loadingTask = await this.createPdfLoadingTask({
+                initialData,
+                CMAP_URL,
+                STANDARD_FONT_DATA_URL
+            });
+            
+            // 4. 加载PDF文档并处理截图
+            return await this.loadAndProcessPdf(loadingTask, pages);
+            
+        } catch (error) {
+            throw new Error(`截图处理失败: ${error.message}`);
+        }
+    }
+
+    /**
+     * 获取PDF.js配置
+     */
+    getPdfJsConfig() {
+        const CMAP_URL = path.join(__dirname, 'node_modules/pdfjs-dist/cmaps/');
+        const STANDARD_FONT_DATA_URL = path.join(__dirname, 'node_modules/pdfjs-dist/standard_fonts/');
+        return { CMAP_URL, STANDARD_FONT_DATA_URL };
+    }
+
+    /**
+     * 创建PDF加载任务
+     */
+    async createPdfLoadingTask({ initialData, CMAP_URL, STANDARD_FONT_DATA_URL }) {
         const needParallel = PARALLEL_RENDER && typeof this.renderPagesParallel === 'function';
         
-        let loadingTask;
-        if (needParallel) {
-            // 并行模式：下载完整PDF数据
-            console.log('[并行模式] 下载完整PDF数据');
-            const response = await fetch(this.pdfPath);
-            if (!response.ok) {
-                throw new Error(`下载PDF失败: ${response.status} ${response.statusText}`);
-            }
-            const arrayBuffer = await response.arrayBuffer();
-            // 使用Buffer存储，避免ArrayBuffer被分离
-            this.pdfData = Buffer.from(arrayBuffer);
-            this.pdfSize = this.pdfData.byteLength;
-            console.log(`[并行模式] PDF下载完成，大小: ${(this.pdfSize / 1024).toFixed(2)}KB`);
-            
-            loadingTask = getDocument({
-                data: new Uint8Array(this.pdfData),
-                cMapUrl: CMAP_URL,
-                cMapPacked: true,
-                standardFontDataUrl: STANDARD_FONT_DATA_URL,
-                verbosity: undefined,
-            });
-        } else {
-            // 串行模式：分片加载
-            // 先拿首片数据 10KB
-            let initialData;
-            try {
-                initialData = await this.generateInitDataPromise();
-            } catch (error) {
-                throw new Error(error);
-            }
-
-            const rangeLoader = new RangeLoader(this.pdfSize, initialData, this.pdfPath, EACH_CHUNK_SIZE);
-            // 再分页加载
-            loadingTask = getDocument({
-                cMapUrl: CMAP_URL,
-                cMapPacked: true,
-                standardFontDataUrl: STANDARD_FONT_DATA_URL,
-                rangeChunkSize: EACH_CHUNK_SIZE, // 分片大小 1MB
-                disableAutoFetch: true, // 关闭自动全量下载
-                range: rangeLoader,
-                verbosity: undefined, // 日志等级由子类控制
-            });
+        if (!needParallel) {
+            return this.createSerialLoadingTask(initialData, CMAP_URL, STANDARD_FONT_DATA_URL);
         }
         
+        return this.createParallelLoadingTask(initialData, CMAP_URL, STANDARD_FONT_DATA_URL);
+    }
+
+    /**
+     * 创建串行模式加载任务
+     */
+    createSerialLoadingTask(initialData, CMAP_URL, STANDARD_FONT_DATA_URL) {
+        const rangeLoader = new RangeLoader(this.pdfSize, initialData, this.pdfPath, EACH_CHUNK_SIZE);
+        return getDocument({
+            cMapUrl: CMAP_URL,
+            cMapPacked: true,
+            standardFontDataUrl: STANDARD_FONT_DATA_URL,
+            rangeChunkSize: EACH_CHUNK_SIZE,
+            disableAutoFetch: true,
+            range: rangeLoader,
+            verbosity: undefined,
+        });
+    }
+
+    /**
+     * 创建并行模式加载任务
+     */
+    async createParallelLoadingTask(initialData, CMAP_URL, STANDARD_FONT_DATA_URL) {
+        const pdfSizeMB = this.pdfSize / 1024 / 1024;
+        
+        if (pdfSizeMB < 5) {
+            return await this.createSmallFileParallelTask(CMAP_URL, STANDARD_FONT_DATA_URL);
+        }
+        
+        return this.createLargeFileSerialTask(initialData, CMAP_URL, STANDARD_FONT_DATA_URL);
+    }
+
+    /**
+     * 创建小文件并行任务
+     */
+    async createSmallFileParallelTask(CMAP_URL, STANDARD_FONT_DATA_URL) {
+        console.log(`[并行模式] PDF较小(${(this.pdfSize / 1024 / 1024).toFixed(2)}MB)，下载完整数据用于并行渲染`);
+        
+        const response = await fetch(this.pdfPath);
+        if (!response.ok) {
+            throw new Error(`下载PDF失败: ${response.status} ${response.statusText}`);
+        }
+        
+        const arrayBuffer = await response.arrayBuffer();
+        this.pdfData = Buffer.from(arrayBuffer);
+        console.log(`[并行模式] PDF下载完成，大小: ${(this.pdfSize / 1024).toFixed(2)}KB`);
+        
+        return getDocument({
+            data: new Uint8Array(this.pdfData),
+            cMapUrl: CMAP_URL,
+            cMapPacked: true,
+            standardFontDataUrl: STANDARD_FONT_DATA_URL,
+            verbosity: undefined,
+        });
+    }
+
+    /**
+     * 创建大文件串行任务
+     */
+    createLargeFileSerialTask(initialData, CMAP_URL, STANDARD_FONT_DATA_URL) {
+        console.log(`[并行模式] PDF较大(${(this.pdfSize / 1024 / 1024).toFixed(2)}MB)，回退到串行模式避免内存问题`);
+        return this.createSerialLoadingTask(initialData, CMAP_URL, STANDARD_FONT_DATA_URL);
+    }
+
+    /**
+     * 加载PDF文档并处理截图
+     */
+    async loadAndProcessPdf(loadingTask, pages) {
         let pdfDocument;
         try {
             pdfDocument = await loadingTask.promise;
             const numPages = pdfDocument.numPages;
             console.log(`PDF 加载成功，共 ${numPages} 页`);
             
-            // 用传递的 pages 参数来截图
             const result = await this.captureByPages({ pages, numPages, pdfDocument });
+            return await this.processCapturedImages(result);
             
-            // 调用子类的具体处理逻辑
-            const data = await this.processCapturedImages(result);
-            
-            return data;
-        } catch (reason) {
-            throw new Error(`截图处理失败: ${reason}`);
         } finally {
-            // 确保 PDF 文档被清理
-            try {
-                if (pdfDocument) {
-                    await pdfDocument.destroy();
-                }
-            } catch (e) {
-                // 忽略清理错误
-                console.warn('PDF文档清理失败:', e.message);
-            }
+            await this.cleanupPdfDocument(pdfDocument);
+        }
+    }
+
+    /**
+     * 清理PDF文档资源
+     */
+    async cleanupPdfDocument(pdfDocument) {
+        if (!pdfDocument) return;
+        
+        try {
+            await pdfDocument.destroy();
+        } catch (e) {
+            console.warn('PDF文档清理失败:', e.message);
         }
     }
 
@@ -159,12 +210,16 @@ class BaseExportImage {
         }
 
         // 判断是否使用并行渲染
-        const useParallel = PARALLEL_RENDER && validPages.length > 1 && this.pdfData && typeof this.renderPagesParallel === 'function';
+        // 并行渲染条件：启用并行、多页、子类支持并行渲染、且有完整PDF数据（大文件会回退到串行模式）
+        const useParallel = PARALLEL_RENDER && validPages.length > 1 && 
+                          this.pdfData && typeof this.renderPagesParallel === 'function';
         
         let bufferArr;
         if (useParallel) {
             console.log(`[并行模式] 渲染 ${validPages.length} 个页面`);
-            bufferArr = await this.renderPagesParallel(validPages, this.pdfData);
+            // 根据加载方式传递不同的数据给并行渲染
+            const renderData = this.pdfData ? this.pdfData : pdfDocument;
+            bufferArr = await this.renderPagesParallel(validPages, renderData);
             if (bufferArr.length > 0) {
                 console.log('🚀首张截图完成耗时', Date.now() - global.begin + 'ms');
             }
@@ -215,6 +270,9 @@ class BaseExportImage {
         throw new Error('processCapturedImages method must be implemented by subclass');
     }
 
+    /**
+     * 获取文档大小
+     */
     getDocumentSize(response) {
         const contentRange = response.headers.get('Content-Range');
         if (contentRange && /^bytes \d+-\d+\/\d+$/i.test(contentRange)) {
@@ -240,7 +298,6 @@ class BaseExportImage {
                     throw new Error(`请求初始数据失败: ${response.status} ${response.statusText}`);
                 }
                 this.pdfSize = this.getDocumentSize(response);
-                console.log('pdfSize', this.pdfSize);
                 return response.arrayBuffer();
             });
     };
