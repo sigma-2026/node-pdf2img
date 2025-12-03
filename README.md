@@ -56,6 +56,123 @@ ls ./output
 * 支持数据分片，拆4个子片，并发请求
 * 接入cos桶
 * 自动资源管理，避免内存泄漏
+* **接口超时保护**：默认 **40秒** 超时，防止长时间运行的请求占用资源
+* **健康检查高负载丢弃**：CPU/内存过载时返回 503，北极星自动摘除实例
+* **PM2 Cluster 模式**：多进程部署，充分利用多核 CPU
+
+## 接口超时配置
+
+项目已配置 **40秒** 的接口超时处理：
+
+- **超时时间**: 40秒
+- **超时响应**: HTTP 408 Request Timeout
+- **豁免端点**: 健康检查端点不受超时限制
+
+### 超时响应示例
+
+```json
+{
+  "code": 408,
+  "message": "Request timeout after 40000ms",
+  "data": null
+}
+```
+
+### 修改超时时间
+
+编辑 [`src/timeout-middleware.js`](./src/timeout-middleware.js)：
+
+```javascript
+// 修改为60秒
+const DEFAULT_TIMEOUT = 60000;
+```
+
+### 详细文档
+
+查看 [TIMEOUT_CONFIG.md](./docs/TIMEOUT_CONFIG.md) 了解：
+- 超时配置详细说明
+- 工作原理和流程
+- 最佳实践建议
+- 故障排查指南
+
+### 测试超时功能
+
+```bash
+# 运行超时测试
+npm run test:timeout
+```
+
+## 健康检查高负载丢弃
+
+`/api/health` 接口支持**高负载丢弃**功能，当系统负载过高时自动返回 503 状态码，触发北极星摘除实例。
+
+### 负载检测
+
+- **CPU 使用率阈值**: 85%（可配置）
+- **系统内存阈值**: 85%（可配置）
+- **堆内存阈值**: 80%（可配置）
+
+### 响应示例
+
+**正常状态（200）**：
+```json
+{
+  "code": 200,
+  "data": {
+    "healthy": true,
+    "status": "healthy",
+    "metrics": {
+      "cpu": { "usage": "45.23", "threshold": 85, "healthy": true },
+      "memory": { "usage": "60.50", "threshold": 85, "healthy": true },
+      "heap": { "usage": "55.30", "threshold": 80, "healthy": true }
+    }
+  },
+  "message": "Service is healthy"
+}
+```
+
+**过载状态（503）**：
+```json
+{
+  "code": 503,
+  "data": {
+    "healthy": false,
+    "status": "overloaded",
+    "reasons": [
+      "CPU过载: 92.50% (阈值: 85%)",
+      "内存过载: 88.30% (阈值: 85%)"
+    ]
+  },
+  "message": "Service is overloaded"
+}
+```
+
+### 配置阈值
+
+通过环境变量配置：
+
+```bash
+export CPU_THRESHOLD=90
+export MEMORY_THRESHOLD=90
+export HEAP_THRESHOLD=85
+
+npm run prod
+```
+
+### 测试功能
+
+```bash
+# 运行健康检查高负载测试
+npm run test:health-load
+```
+
+### 详细文档
+
+查看 [HEALTH_LOAD_REJECTION.md](./docs/HEALTH_LOAD_REJECTION.md) 了解：
+- 高负载丢弃功能详解
+- 与北极星集成配置
+- 监控告警建议
+- 故障排查指南
 
 # 资源管理
 

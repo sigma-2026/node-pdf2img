@@ -9,6 +9,9 @@
     "pm2": "pm2 start app.js --no-daemon --env production",
     "test": "npm run test:api",
     "test:integration": "node test/integration/api-pdf2img.test.mjs",
+    "test:health": "node test/health-check.test.mjs",
+    "test:health-load": "node test/health-load.test.mjs",
+    "test:timeout": "node test/timeout.test.mjs",
     "test:performance": "node ./test-local.js",
     "docker:push": "node ./tool/exec-docker-push.js",
     "prod": "node entry.js",
@@ -16,8 +19,6 @@
     "benchmark:health": "node ./scripts/benchmark.js health",
     "benchmark:pdf2img": "node ./scripts/benchmark.js pdf2img"
   },
-  "keywords": [],
-  "author": "",
   "license": "ISC",
   "dependencies": {
     "@mswjs/interceptors": "^0.39.6",

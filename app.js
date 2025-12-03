@@ -5,6 +5,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { IS_DEV } from "./src/env.js";
 import { registerTestLocalRoute } from './src/test-local-route.js';
+import { timeoutMiddleware, getTimeoutConfig } from './src/timeout-middleware.js';
 
 // 获取当前模块路径
 const __filename = fileURLToPath(import.meta.url);
@@ -22,7 +23,17 @@ config();
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
-// Middleware
+// 打印超时配置
+const timeoutConfig = getTimeoutConfig();
+console.log(`========== 接口超时配置 ==========`);
+console.log(`超时时间: ${timeoutConfig.timeoutSeconds}秒 (${timeoutConfig.timeout}ms)`);
+console.log(`===================================`);
+
+// ========== 核心中间件 ==========
+// 1. 请求超时中间件（40秒超时）
+app.use(timeoutMiddleware());
+
+// ========== 基础中间件 ==========
 app.use(express.json());
 // 处理表单数据
 app.use(express.urlencoded({ extended: true }));
