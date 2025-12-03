@@ -102,11 +102,39 @@ const DEFAULT_TIMEOUT = 60000;
 npm run test:timeout
 ```
 
-## 健康检查高负载丢弃
+## 高负载丢弃功能
+
+项目实现了**双重高负载保护机制**，确保服务在高负载下的稳定性：
+
+### 1. /api/pdf2img 接口负载保护（请求入口保护）
+
+`/api/pdf2img` 接口在处理请求前会先检查系统负载，过载时立即返回 503，避免资源浪费。
+
+**特点**：
+- ⚡ **快速失败**：过载时 <10ms 返回 503
+- 🛡️ **保护稳定**：防止系统崩溃和雪崩
+- 🔄 **自动恢复**：配合北极星实现优雅降级
+
+**过载响应示例（503）**：
+```json
+{
+  "code": 503,
+  "message": "Service is overloaded, please try again later",
+  "data": {
+    "reasons": [
+      "CPU过载: 92.35% (阈值: 85%)",
+      "堆内存过载: 87.21% (阈值: 80%)"
+    ],
+    "retryAfter": 5
+  }
+}
+```
+
+### 2. /api/health 健康检查（实例级保护）
 
 `/api/health` 接口支持**高负载丢弃**功能，当系统负载过高时自动返回 503 状态码，触发北极星摘除实例。
 
-### 负载检测
+### 负载检测指标
 
 - **CPU 使用率阈值**: 85%（可配置）
 - **系统内存阈值**: 85%（可配置）
@@ -159,20 +187,32 @@ export HEAP_THRESHOLD=85
 npm run prod
 ```
 
+### 双重保护机制
+
+| 保护层 | 端点 | 作用 | 响应时间 | 触发条件 |
+|--------|------|------|----------|----------|
+| **第一层** | `/api/pdf2img` | 请求入口保护 | <10ms | 每次请求检查 |
+| **第二层** | `/api/health` | 实例级保护 | 5秒间隔 | 北极星定期检查 |
+
 ### 测试功能
 
 ```bash
-# 运行健康检查高负载测试
+# 测试健康检查端点
 npm run test:health-load
+
+# 测试 /pdf2img 接口负载保护
+node test/pdf2img-load-protection.test.mjs
+
+# 压力测试（触发高负载）
+node test/stress-test.mjs
 ```
 
 ### 详细文档
 
-查看 [HEALTH_LOAD_REJECTION.md](./docs/HEALTH_LOAD_REJECTION.md) 了解：
-- 高负载丢弃功能详解
-- 与北极星集成配置
-- 监控告警建议
-- 故障排查指南
+- [/pdf2img 接口负载保护文档](./docs/PDF2IMG_LOAD_PROTECTION.md)
+- [健康检查高负载丢弃文档](./docs/HEALTH_LOAD_REJECTION.md)
+- [与北极星集成配置](./docs/POLARIS_HEALTH_CHECK.md)
+- [监控告警建议](./docs/HEALTH_LOAD_SHEDDING.md)
 
 # 资源管理
 

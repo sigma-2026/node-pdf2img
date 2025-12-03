@@ -68,6 +68,31 @@ const router = express.Router();
  */
 router.post('/pdf2img', async (req, res) => {
   global.begin = Date.now();
+  
+  // 1. 先检查系统负载（高负载丢弃）
+  try {
+    const healthStatus = await checkHealth();
+    if (!healthStatus.healthy) {
+      console.warn('[PDF2IMG] ⚠️ 服务过载，拒绝新请求:', {
+        reasons: healthStatus.reasons,
+        metrics: healthStatus.metrics,
+      });
+      return res.status(503).send({
+        code: 503,
+        message: 'Service is overloaded, please try again later',
+        data: {
+          reasons: healthStatus.reasons,
+          metrics: healthStatus.metrics,
+          retryAfter: 5, // 建议5秒后重试
+        },
+      });
+    }
+  } catch (error) {
+    console.error('[PDF2IMG] 负载检查失败:', error);
+    // 负载检查失败不阻塞请求，继续处理
+  }
+  
+  // 2. 验证参数
   const url = req.body.url;
   const globalPadId = req.body.globalPadId;
   // 验证参数 url
