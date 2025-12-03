@@ -93,11 +93,11 @@ const extraEnvStr = EnvBuilder.getExtraEnvStr();
 // 注意：使用 -i <instances> 参数时，PM2 会自动启用 cluster 模式
 // 某些高级配置（如 merge_logs, listen_timeout, kill_timeout）需要通过配置文件设置，命令行不支持
 const name = `--name "prod-pdf2img-server"`;             // 进程命名
-const instances = `-i ${cpuCount - 1}`;                  // cluster 模式：使用核数-1个实例
+const instances = `-i 3`;                  // cluster 模式：使用3个实例
 const memmory = `--max-memory-restart 1G`;               // 内存超1GB自动重启
 const cron = `--cron "0 4 * * *"`;                       // 每日UTC 04:00定时重启
-const outLog = `-o /usr/src/app/pm2/logs/pdf2img.log`;  // 标准输出日志
-const errLog = `-e /usr/src/app/pm2/logs/pdf2img.log`;  // 错误输出日志
+const outLog = `--output /usr/src/app/pm2/logs/pdf2img.log`;  // 标准输出日志
+const errLog = `--error /usr/src/app/pm2/logs/pdf2img.log`;  // 错误输出日志
 
 // 组合稳定运行参数（cluster 模式）
 const stableStr = `${name} ${instances} ${memmory} ${cron} ${outLog} ${errLog}`;

@@ -12,9 +12,6 @@ const HEALTH_CONFIG = {
   
   // 内存使用率阈值（百分比）
   MEMORY_THRESHOLD: Number(process.env.MEMORY_THRESHOLD) || 85,
-  
-  // 堆内存使用率阈值（百分比）
-  HEAP_THRESHOLD: Number(process.env.HEAP_THRESHOLD) || 80,
 };
 
 // 存储上一次 CPU 使用情况
@@ -88,22 +85,7 @@ export function getMemoryUsage() {
   };
 }
 
-/**
- * 获取堆内存使用率
- * @returns {Object} 堆内存使用信息
- */
-export function getHeapUsage() {
-  const memUsage = process.memoryUsage();
-  const heapUsagePercent = (memUsage.heapUsed / memUsage.heapTotal) * 100;
-  
-  return {
-    heapUsed: memUsage.heapUsed,
-    heapTotal: memUsage.heapTotal,
-    usagePercent: heapUsagePercent,
-    heapUsedMB: (memUsage.heapUsed / 1024 / 1024).toFixed(2),
-    heapTotalMB: (memUsage.heapTotal / 1024 / 1024).toFixed(2),
-  };
-}
+
 
 /**
  * 检查系统健康状态
@@ -112,13 +94,11 @@ export function getHeapUsage() {
 export async function checkHealth() {
   const cpuUsage = await getCpuUsage();
   const memoryUsage = getMemoryUsage();
-  const heapUsage = getHeapUsage();
   
   // 判断是否健康
   const isCpuHealthy = cpuUsage < HEALTH_CONFIG.CPU_THRESHOLD;
   const isMemoryHealthy = memoryUsage.usagePercent < HEALTH_CONFIG.MEMORY_THRESHOLD;
-  const isHeapHealthy = heapUsage.usagePercent < HEALTH_CONFIG.HEAP_THRESHOLD;
-  const isHealthy = isCpuHealthy && isMemoryHealthy && isHeapHealthy;
+  const isHealthy = isCpuHealthy && isMemoryHealthy;
   
   // 收集不健康的原因
   const unhealthyReasons = [];
@@ -127,9 +107,6 @@ export async function checkHealth() {
   }
   if (!isMemoryHealthy) {
     unhealthyReasons.push(`内存过载: ${memoryUsage.usagePercent.toFixed(2)}% (阈值: ${HEALTH_CONFIG.MEMORY_THRESHOLD}%)`);
-  }
-  if (!isHeapHealthy) {
-    unhealthyReasons.push(`堆内存过载: ${heapUsage.usagePercent.toFixed(2)}% (阈值: ${HEALTH_CONFIG.HEAP_THRESHOLD}%)`);
   }
   
   return {
@@ -148,13 +125,6 @@ export async function checkHealth() {
         totalMB: memoryUsage.totalMB,
         threshold: HEALTH_CONFIG.MEMORY_THRESHOLD,
         healthy: isMemoryHealthy,
-      },
-      heap: {
-        usage: heapUsage.usagePercent.toFixed(2),
-        usedMB: heapUsage.heapUsedMB,
-        totalMB: heapUsage.heapTotalMB,
-        threshold: HEALTH_CONFIG.HEAP_THRESHOLD,
-        healthy: isHeapHealthy,
       },
     },
     uptime: process.uptime(),
@@ -178,9 +148,6 @@ export function updateHealthConfig(config) {
   }
   if (config.MEMORY_THRESHOLD !== undefined) {
     HEALTH_CONFIG.MEMORY_THRESHOLD = config.MEMORY_THRESHOLD;
-  }
-  if (config.HEAP_THRESHOLD !== undefined) {
-    HEALTH_CONFIG.HEAP_THRESHOLD = config.HEAP_THRESHOLD;
   }
   return getHealthConfig();
 }

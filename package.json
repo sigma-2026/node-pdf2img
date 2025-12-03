@@ -14,6 +14,7 @@
     "test:timeout": "node test/timeout.test.mjs",
     "test:performance": "node ./test-local.js",
     "docker:push": "node ./tool/exec-docker-push.js",
+    "docker:local": "node ./tool/exec-local.js",
     "prod": "node entry.js",
     "benchmark": "node ./scripts/benchmark.js all",
     "benchmark:health": "node ./scripts/benchmark.js health",

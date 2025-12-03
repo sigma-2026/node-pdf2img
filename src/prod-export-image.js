@@ -10,7 +10,7 @@ const __dirname = path.dirname(__filename);
 // 渲染配置
 const RENDER_SCALE = parseFloat(process.env.RENDER_SCALE) || 1.5; // 从2.0降为1.5，提升约40%性能
 const PARALLEL_RENDER = process.env.PARALLEL_RENDER !== 'false'; // 默认启用并行渲染
-const WORKER_THREADS = parseInt(process.env.WORKER_THREADS) || 4; // Worker线程数
+const WORKER_THREADS = parseInt(process.env.WORKER_THREADS) || 2; // Worker线程数
 
 // 创建 Worker 线程池（延迟初始化）
 let workerPool = null;
