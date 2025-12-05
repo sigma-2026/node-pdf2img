@@ -2,6 +2,7 @@ import { parentPort, workerData } from 'worker_threads';
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import path from 'path';
 import { fileURLToPath } from 'url';
+import sharp from 'sharp';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -52,8 +53,11 @@ export default async function renderPage({ pdfBase64, pageNum, scale = 1.5 }) {
         const renderTask = page.render(renderContext);
         await renderTask.promise;
 
-        // 转换为 WebP 图片
-        const image = canvasAndContext.canvas.toBuffer("image/webp");
+        // 使用 sharp 进行 WebP 编码（比 canvas.toBuffer('image/webp') 更稳定）
+        const pngBuffer = canvasAndContext.canvas.toBuffer("image/png");
+        const image = await sharp(pngBuffer)
+            .webp({ quality: 80 })
+            .toBuffer();
 
         return {
             pageNum,

@@ -3,6 +3,7 @@ import { uploadFiles } from './upload-file.js';
 import { Piscina } from 'piscina';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import sharp from 'sharp';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -56,7 +57,11 @@ class ProdExportImage extends BaseExportImage {
             const renderTask = page.render(renderContext);
             await renderTask.promise;
 
-            const image = canvasAndContext.canvas.toBuffer("image/webp");
+            // 使用 sharp 进行 WebP 编码（比 canvas.toBuffer('image/webp') 更稳定）
+            const pngBuffer = canvasAndContext.canvas.toBuffer("image/png");
+            const image = await sharp(pngBuffer)
+                .webp({ quality: 80 })
+                .toBuffer();
             
             return {
                 pageNum,
