@@ -1,0 +1,77 @@
+# CGO 版本 Dockerfile（使用原生 pdfium，性能更好）
+
+# 阶段1: 构建
+FROM golang:1.21-bookworm AS builder
+
+# 安装构建依赖和 pdfium
+RUN apt-get update && apt-get install -y \
+    git \
+    ca-certificates \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# 下载预编译的 pdfium
+RUN mkdir -p /opt/pdfium && \
+    wget -q https://github.com/nickelchen/nickel-pdfium/releases/download/chromium%2F6721/pdfium-linux-x64.tgz -O /tmp/pdfium.tgz && \
+    tar -xzf /tmp/pdfium.tgz -C /opt/pdfium && \
+    rm /tmp/pdfium.tgz
+
+ENV CGO_ENABLED=1
+ENV CGO_CFLAGS="-I/opt/pdfium/include"
+ENV CGO_LDFLAGS="-L/opt/pdfium/lib -lpdfium"
+ENV LD_LIBRARY_PATH="/opt/pdfium/lib:${LD_LIBRARY_PATH}"
+
+WORKDIR /app
+
+# 复制依赖文件
+COPY go.mod go.sum ./
+RUN go mod download
+
+# 复制源码
+COPY . .
+
+# 构建 CGO 版本
+RUN go build \
+    -tags cgo \
+    -ldflags="-w -s" \
+    -o /app/pdf2img \
+    ./cmd/server
+
+# 阶段2: 运行时镜像
+FROM debian:bookworm-slim
+
+# 安装运行时依赖
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    fontconfig \
+    fonts-dejavu \
+    fonts-noto-cjk \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# 复制 pdfium 库
+COPY --from=builder /opt/pdfium/lib /opt/pdfium/lib
+ENV LD_LIBRARY_PATH="/opt/pdfium/lib:${LD_LIBRARY_PATH}"
+
+# 设置时区
+ENV TZ=Asia/Shanghai
+
+WORKDIR /app
+
+# 从构建阶段复制二进制
+COPY --from=builder /app/pdf2img /app/pdf2img
+
+# 创建非 root 用户
+RUN useradd -u 1000 -m appuser
+USER appuser
+
+# 暴露端口
+EXPOSE 3000
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1
+
+# 启动
+ENTRYPOINT ["/app/pdf2img"]
+CMD ["-port", "3000", "-mode", "release"]
