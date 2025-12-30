@@ -1,20 +1,22 @@
-# 构建阶段：安装编译依赖并构建 canvas
+# 构建阶段：安装编译依赖并构建 canvas + sharp
 FROM node:20-slim AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential python3 \
     libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev \
+    libvips-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/src/app
-COPY package*.json ./
-RUN npm ci --only=production
+COPY package.json .npmrc ./
+RUN npm install --omit=dev
 
 # 运行阶段：仅包含运行时依赖
 FROM node:20-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libcairo2 libpango-1.0-0 libjpeg62-turbo libgif7 \
+    libvips42 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/src/app

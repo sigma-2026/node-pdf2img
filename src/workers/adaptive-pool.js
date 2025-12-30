@@ -12,15 +12,22 @@ import os from 'os';
 import { Piscina } from 'piscina';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createLogger } from '../utils/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const logger = createLogger('WorkerPool');
+
 // ==================== 配置 ====================
+// 线程池策略：
+// - MIN_THREADS = CPU核心数：保证基础并行能力
+// - MAX_THREADS = CPU核心数 * 2：允许I/O密集型任务与CPU密集型任务重叠执行
+// - 额外的Worker主要用于处理网络I/O（下载PDF），不会占用CPU
 const POOL_CONFIG = {
     CPU_CORES: os.cpus().length,
-    MIN_THREADS: parseInt(process.env.MIN_WORKER_THREADS) || 2,
-    MAX_THREADS: parseInt(process.env.MAX_WORKER_THREADS) || Math.max(os.cpus().length, 4),
+    MIN_THREADS: parseInt(process.env.MIN_WORKER_THREADS) || os.cpus().length,
+    MAX_THREADS: parseInt(process.env.MAX_WORKER_THREADS) || os.cpus().length * 2,
     IDLE_TIMEOUT: parseInt(process.env.WORKER_IDLE_TIMEOUT) || 30000,  // 30 秒空闲后回收
     // Worker 内存限制（MB）- 防止单个"毒丸"PDF 拖垮整个进程
     MAX_OLD_GENERATION_SIZE_MB: parseInt(process.env.WORKER_MAX_MEM_MB) || 700,
@@ -57,7 +64,7 @@ class WorkerPool {
         
         this.isDestroyed = false;
         
-        console.log(`[WorkerPool:${this.name}] 初始化，CPU核心: ${POOL_CONFIG.CPU_CORES}, 线程范围: ${POOL_CONFIG.MIN_THREADS}-${POOL_CONFIG.MAX_THREADS}, 单Worker内存限制: ${POOL_CONFIG.MAX_OLD_GENERATION_SIZE_MB}MB`);
+        logger.info(`[${this.name}] 初始化，CPU核心: ${POOL_CONFIG.CPU_CORES}, 线程范围: ${POOL_CONFIG.MIN_THREADS}-${POOL_CONFIG.MAX_THREADS}, 单Worker内存限制: ${POOL_CONFIG.MAX_OLD_GENERATION_SIZE_MB}MB`);
     }
     
     /**
@@ -117,7 +124,7 @@ class WorkerPool {
         this.isDestroyed = true;
         await this.pool.destroy();
         
-        console.log(`[WorkerPool:${this.name}] 已销毁`);
+        logger.info(`[${this.name}] 已销毁`);
     }
 }
 

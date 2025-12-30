@@ -86,7 +86,9 @@ class RangeRequestTracker {
 function createStaticServer(tracker) {
   return http.createServer((req, res) => {
     const staticDir = path.join(__dirname, '..', 'static');
-    const filePath = path.join(staticDir, req.url);
+    // 解码 URL 以支持中文文件名
+    const decodedUrl = decodeURIComponent(req.url);
+    const filePath = path.join(staticDir, decodedUrl);
     
     // 安全检查
     if (!filePath.startsWith(staticDir)) {
@@ -230,7 +232,8 @@ async function testPdfFile(filename, tracker, pages = 'all') {
   }
   
   const fileSize = fs.statSync(pdfPath).size;
-  const pdfUrl = `${STATIC_URL}/${filename}`;
+  // URL 编码文件名以支持中文
+  const pdfUrl = `${STATIC_URL}/${encodeURIComponent(filename)}`;
   
   console.log(`\n${colors.cyan}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${colors.reset}`);
   console.log(`${colors.bold}测试文件: ${filename}${colors.reset}`);
@@ -310,10 +313,23 @@ async function testPdfFile(filename, tracker, pages = 'all') {
 async function testRealisticConcurrency(tracker, totalRequests = 20, maxConcurrency = 5) {
   const staticDir = path.join(__dirname, '..', 'static');
   
-  // 获取所有可用的 PDF 文件
-  const availableFiles = ['1M.pdf', '10M.pdf', '50M.pdf', '80M.pdf'].filter(f => 
-    fs.existsSync(path.join(staticDir, f))
-  );
+  // 获取所有可用的 PDF 文件（覆盖不同大小范围）
+  const availableFiles = [
+    // 小文件
+    '股权转让协议书 (2).pdf',
+    '1M.pdf',
+    '固收专题分析报告：城投非标手册西南篇（2019版）-20191008-国金证券-24页.pdf',
+    // 中等文件
+    'DJI_Osmo_Action_5_Pro_User_Manual_v1.0_chs.pdf',
+    '10M.pdf',
+    '流动性风险-精讲阶段讲义（上）_1.pdf',
+    // 大文件
+    'ISO_32000-2_sponsored-ec2.pdf',
+    '四年级数学.pdf',
+    'Rust语言圣经(Rust Course)-25.3.10.pdf',
+    '50M.pdf',
+    '80M.pdf',
+  ].filter(f => fs.existsSync(path.join(staticDir, f)));
   
   if (availableFiles.length === 0) {
     console.log(`${colors.yellow}⚠ 没有可用的测试文件${colors.reset}`);
@@ -336,7 +352,8 @@ async function testRealisticConcurrency(tracker, totalRequests = 20, maxConcurre
     return {
       id: i + 1,
       file: randomFile,
-      url: `${STATIC_URL}/${randomFile}`,
+      // URL 编码文件名以支持中文
+      url: `${STATIC_URL}/${encodeURIComponent(randomFile)}`,
       pages: PAGES_TO_RENDER,
     };
   });
@@ -534,10 +551,22 @@ async function runPerformanceTests() {
     const PAGES_TO_RENDER = [1, 2, 3, 4, 5, 6];
     
     const testFiles = [
-      { file: '1M.pdf', pages: PAGES_TO_RENDER },
-      { file: '10M.pdf', pages: PAGES_TO_RENDER },
-      { file: '50M.pdf', pages: PAGES_TO_RENDER },
-      { file: '80M.pdf', pages: PAGES_TO_RENDER },
+      // 小文件 (<2MB) - 应使用单 Worker
+      { file: '股权转让协议书 (2).pdf', pages: PAGES_TO_RENDER },  // 593KB
+      { file: '1M.pdf', pages: PAGES_TO_RENDER },                   // 992KB
+      { file: '固收专题分析报告：城投非标手册西南篇（2019版）-20191008-国金证券-24页.pdf', pages: PAGES_TO_RENDER },  // 1.75MB
+      
+      // 中等文件 (2-10MB) - 应适度并行
+      { file: 'DJI_Osmo_Action_5_Pro_User_Manual_v1.0_chs.pdf', pages: PAGES_TO_RENDER },  // 2.78MB
+      { file: '10M.pdf', pages: PAGES_TO_RENDER },                   // 8.76MB
+      { file: '流动性风险-精讲阶段讲义（上）_1.pdf', pages: PAGES_TO_RENDER },  // 9.71MB
+      
+      // 大文件 (>10MB) - 应充分并行
+      { file: 'ISO_32000-2_sponsored-ec2.pdf', pages: PAGES_TO_RENDER },  // 16.53MB
+      { file: '四年级数学.pdf', pages: PAGES_TO_RENDER },           // 20.89MB
+      { file: 'Rust语言圣经(Rust Course)-25.3.10.pdf', pages: PAGES_TO_RENDER },  // 34.72MB
+      { file: '50M.pdf', pages: PAGES_TO_RENDER },                   // 55.31MB
+      { file: '80M.pdf', pages: PAGES_TO_RENDER },                   // 77.86MB
     ];
     
     // 单文件测试

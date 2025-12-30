@@ -1,14 +1,24 @@
 /**
  * PDF 转图片核心模块
  * 
- * 架构：
- * 1. 主线程接收请求 -> 创建 Worker 任务
- * 2. Worker 内部：Range 加载 -> 解析 PDF -> 渲染 -> 上传 COS（生产环境）
- * 3. 主线程收集结果并返回
+ * 架构（混合式智能批处理 v2 - Hybrid Smart-Batching）：
+ * 1. 首批渲染与元信息获取合并，避免重复初始化
+ * 2. 第一个 Worker 负责：获取元信息 + 渲染首批页面（默认前6页）
+ * 3. 根据返回的 PDF 特性决定是否需要启动更多 Worker 处理剩余页面
+ * 4. 每个 Worker 独立使用 RangeLoader 分片加载
  * 
- * 渲染策略：
- * - 默认 1.5 倍缩放
- * - 最大宽度限制 2000px，防止渲染超大图片
+ * 核心优化：
+ * - 小文件（<2MB）：单 Worker 完成所有工作，只初始化 1 次
+ * - 中/大文件：首批完成后，根据 PDF 大小智能分配剩余 Worker
+ * - 消除了"先获取元信息，再渲染"的重复初始化问题
+ * 
+ * 流程示例（请求前6页）：
+ * - 小文件：Worker1 渲染 [1-6] → 完成
+ * - 大文件：Worker1 渲染 [1-6] → 无剩余 → 完成
+ * 
+ * 流程示例（pages='all'，100页 PDF）：
+ * - 小文件：Worker1 渲染 [1-6] → Worker1 渲染 [7-100]
+ * - 大文件：Worker1 渲染 [1-6] → Worker2-N 并行渲染 [7-100]
  * 
  * dev/prod 环境共用代码，区别仅在于是否上传 COS
  */
@@ -16,9 +26,7 @@
 import fs from 'fs';
 import path from 'path';
 import { getWorkerPool } from '../workers/adaptive-pool.js';
-
-// 环境判断
-const IS_DEV = process.env.NODE_ENV === 'dev';
+import { createLogger, IS_DEV, IS_TEST } from '../utils/logger.js';
 
 // 配置
 const OUTPUT_DIR = process.env.OUTPUT_DIR || './output';
@@ -34,15 +42,17 @@ class Pdf2Img {
         this.requestTracker = requestTracker;
         this.abortSignal = abortSignal;
         this.pdfSize = 0;
-        this.preciseTimeoutHandle = null;  // 精准超时句柄
+        this.logger = createLogger(globalPadId);
     }
 
     /**
-     * PDF 转图片主入口
+     * PDF 转图片主入口（混合式智能批处理 v2）
      * 
-     * 优化：精准超时控制
-     * - 在获取 pdfSize 后，基于真实文件大小计算超时时间
-     * - 使用 Promise.race 与业务逻辑并行执行超时检测
+     * 核心优化：合并元信息获取与首批渲染，避免重复初始化
+     * - 第一个 Worker 负责获取元信息 + 渲染首批页面
+     * - 根据返回的 PDF 特性决定是否需要启动更多 Worker
+     * - 小文件：单 Worker 完成所有工作
+     * - 大文件：首批完成后并行启动剩余 Worker
      * 
      * @param {Object} options
      * @param {string} options.pdfPath - PDF 文件 URL
@@ -51,63 +61,104 @@ class Pdf2Img {
      */
     async pdfToImage({ pdfPath, pages }) {
         const startTime = Date.now();
-        
-        this.log('info', `开始处理 PDF: ${pdfPath.substring(0, 100)}...`);
-        
+        this.log('info', `处理开始: ${pdfPath.substring(0, 100)}...`);
+
+        const pool = getWorkerPool();
+        const uploadToCos = !IS_DEV;
+
         try {
-            if (this.requestTracker) {
-                this.requestTracker.startPhase('pdfInfo');
-                this.requestTracker.startPhase('render');
-            }
-            
-            // 直接派发 Worker 任务，Worker 返回 numPages + pdfSize + 渲染结果
-            // 精准超时在首批渲染后根据 pdfSize 计算
-            let results;
-            let numPages;
-            let pdfSize = 0;
+            // ========== 确定初始目标页码 ==========
+            let targetPages;
+            let needAllPages = false;
             
             if (pages === 'all') {
-                // "all" 请求：先渲染首批页面获取 numPages，再追加后续页面
-                const renderResult = await this.renderAllPagesOptimized(pdfPath);
-                results = renderResult.results;
-                numPages = renderResult.numPages;
-                pdfSize = renderResult.pdfSize;
-            } else if (!pages) {
-                // 默认请求（前 6 页）：直接派发，Worker 返回 numPages
-                const renderResult = await this.renderFirstBatch(pdfPath, 6);
-                results = renderResult.results;
-                numPages = renderResult.numPages;
-                pdfSize = renderResult.pdfSize;
+                // 需要所有页，但此时不知道总页数，先请求前6页
+                targetPages = [1, 2, 3, 4, 5, 6];
+                needAllPages = true;
+            } else if (Array.isArray(pages)) {
+                targetPages = [...new Set(pages)].filter(p => p >= 1).sort((a, b) => a - b);
             } else {
-                // 指定页码：直接渲染，Worker 会自动过滤无效页码
-                const renderResult = await this.renderSpecificPages(pdfPath, pages);
-                results = renderResult.results;
-                numPages = renderResult.numPages;
-                pdfSize = renderResult.pdfSize;
+                // 默认前6页
+                targetPages = [1, 2, 3, 4, 5, 6];
             }
             
-            this.pdfSize = pdfSize;
+            if (targetPages.length === 0) {
+                return [];
+            }
             
-            if (this.requestTracker) {
-                this.requestTracker.endPhase('pdfInfo', { pdfSize, numPages });
-                this.requestTracker.event('pdfLoaded', { numPages, pdfSize });
-                this.requestTracker.endPhase('render', { 
-                    pageCount: results.length,
-                    successCount: results.filter(r => r.success).length
+            // ========== 第一阶段：首批渲染（同时获取元信息）==========
+            this.requestTracker?.startPhase('render');
+            
+            const firstBatchResult = await pool.run({
+                pdfUrl: pdfPath,
+                pageNums: targetPages,
+                globalPadId: this.globalPadId,
+                uploadToCos,
+            });
+            
+            if (!firstBatchResult.success) {
+                throw new Error(firstBatchResult.error || '首批渲染失败');
+            }
+            
+            const { numPages, pdfSize } = firstBatchResult.metrics;
+            this.pdfSize = pdfSize;
+            this.collectWorkerMetrics(firstBatchResult.metrics);
+            
+            const pdfSizeMB = pdfSize / 1024 / 1024;
+            this.log('info', `PDF 特性: ${pdfSizeMB.toFixed(2)}MB, ${numPages} 页`);
+            
+            // 首张图片事件
+            if (firstBatchResult.results?.length > 0) {
+                const ttffMs = Date.now() - startTime;
+                this.requestTracker?.event('firstImageReady', {
+                    pageNum: firstBatchResult.results[0].pageNum,
+                    ttffMs,
+                    mode: 'first-batch',
                 });
             }
             
-            this.log('info', `PDF: ${(pdfSize / 1024 / 1024).toFixed(2)}MB, ${numPages} 页，渲染 ${results.length} 页`);
+            // 过滤首批结果中有效的页面
+            let allResults = [...(firstBatchResult.results || [])];
+            const renderedPages = new Set(allResults.filter(r => r.success).map(r => r.pageNum));
             
-            // 3. 处理结果
-            const processedResults = await this.processResults(results);
+            // ========== 第二阶段：确定剩余页码 ==========
+            let remainingPages = [];
+            
+            if (needAllPages) {
+                // pages === 'all'，需要渲染所有页
+                remainingPages = Array.from({ length: numPages }, (_, i) => i + 1)
+                    .filter(p => !renderedPages.has(p));
+            } else if (Array.isArray(pages)) {
+                // 指定页码，过滤掉已渲染的和超出范围的
+                remainingPages = targetPages.filter(p => p <= numPages && !renderedPages.has(p));
+            }
+            // 默认前6页的情况，首批已经处理完毕，无需额外渲染
+            
+            // ========== 第三阶段：处理剩余页面 ==========
+            if (remainingPages.length > 0) {
+                this.log('info', `剩余 ${remainingPages.length} 页待渲染`);
+                
+                const additionalResults = await this.renderRemainingPages(
+                    pdfPath, remainingPages, pool, uploadToCos, pdfSize, numPages
+                );
+                allResults.push(...additionalResults);
+            }
+            
+            // 按页码排序
+            allResults.sort((a, b) => a.pageNum - b.pageNum);
+            
+            this.requestTracker?.endPhase('render', {
+                pageCount: allResults.length,
+                successCount: allResults.filter(r => r.success).length,
+            });
+
+            const processedResults = await this.processResults(allResults);
             
             const totalTime = Date.now() - startTime;
-            this.log('info', `处理完成，耗时 ${totalTime}ms`);
-            
-            if (this.requestTracker) {
-                this.requestTracker.event('allImagesReady', { totalDuration: totalTime });
-            }
+            const successCount = processedResults.length;
+            const totalRequested = needAllPages ? numPages : targetPages.length;
+            this.log('info', `处理完成，耗时 ${totalTime}ms，成功 ${successCount}/${totalRequested} 页`);
+            this.requestTracker?.event('allImagesReady', { totalDuration: totalTime });
             
             return processedResults;
             
@@ -118,184 +169,89 @@ class Pdf2Img {
     }
 
     /**
-     * 渲染首批页面（并行获取 numPages + pdfSize）
-     * 
-     * 直接派发 Worker 任务渲染前 N 页，Worker 返回 numPages 和 pdfSize
-     * 元信息获取延迟被隐藏在首页渲染过程中
+     * 渲染剩余页面（智能分批）
      */
-    async renderFirstBatch(pdfUrl, maxPages = 6) {
-        const pool = getWorkerPool();
-        const uploadToCos = !IS_DEV;
+    async renderRemainingPages(pdfPath, remainingPages, pool, uploadToCos, pdfSize, numPages) {
+        const poolStatus = pool.getStatus();
+        const cpuCores = poolStatus.config.cpuCores;
+        const maxThreads = poolStatus.config.maxThreads;
+        const pdfSizeMB = pdfSize / 1024 / 1024;
         
-        const pageNums = Array.from({ length: maxPages }, (_, i) => i + 1);
+        // ========== 基于 PDF 大小决定 Worker 数量 ==========
+        let optimalWorkers;
+        let strategyReason;
         
-        this.log('info', `🚀 直接渲染首批 ${maxPages} 页`);
+        if (pdfSizeMB < 2) {
+            // 小文件：单 Worker（但首批已经处理了，这里是剩余页面）
+            optimalWorkers = 1;
+            strategyReason = '小文件(<2MB)，单Worker';
+        } else if (pdfSizeMB < 10) {
+            // 中等文件：适度并行
+            const pagesPerWorker = 3;
+            optimalWorkers = Math.min(
+                Math.ceil(remainingPages.length / pagesPerWorker),
+                Math.ceil(cpuCores / 2),
+                remainingPages.length
+            );
+            optimalWorkers = Math.max(1, optimalWorkers);
+            strategyReason = `中等文件(${pdfSizeMB.toFixed(1)}MB)，适度并行`;
+        } else {
+            // 大文件：充分并行
+            optimalWorkers = Math.min(cpuCores, remainingPages.length, maxThreads);
+            strategyReason = `大文件(${pdfSizeMB.toFixed(1)}MB)，充分并行`;
+        }
         
-        const result = await pool.run({
-            pdfUrl,
-            pageNums,
-            globalPadId: this.globalPadId,
-            uploadToCos,
+        const numBatches = Math.max(1, optimalWorkers);
+        
+        this.log('info', `剩余页调度: ${strategyReason}`);
+        this.log('info', `分配: ${remainingPages.length} 页 -> ${numBatches} 个 Worker`);
+        
+        // 发牌式分配
+        const batches = Array.from({ length: numBatches }, () => []);
+        remainingPages.forEach((pageNum, index) => {
+            batches[index % numBatches].push(pageNum);
         });
         
-        if (!result.success) {
-            throw new Error(result.error || '渲染失败');
+        if (IS_DEV || IS_TEST) {
+            this.log('debug', `批次详情: ${batches.map((b, i) => `W${i}:[${b.join(',')}]`).join(' ')}`);
         }
         
-        const { numPages, pdfSize } = result.metrics;
-        
-        // 首张图片完成事件
-        if (result.results?.length > 0 && this.requestTracker) {
-            const ttffMs = Date.now() - this.requestTracker.startTime;
-            this.requestTracker.event('firstImageReady', { 
-                pageNum: result.results[0].pageNum, 
-                ttffMs, 
-                mode: 'optimized' 
-            });
-        }
-        
-        return { results: result.results || [], numPages, pdfSize };
-    }
-
-    /**
-     * 优化的 "all" 页面渲染
-     * 
-     * 策略：
-     * 1. 先派发首批页面（1-6）的 Worker，获取 numPages + pdfSize
-     * 2. 根据 numPages 判断是否需要追加后续 Worker
-     * 3. 并行处理后续页面
-     */
-    async renderAllPagesOptimized(pdfUrl) {
-        const FIRST_BATCH_SIZE = 6;
-        const uploadToCos = !IS_DEV;
-        const pool = getWorkerPool();
-        
-        this.log('info', `📄 "all" 请求：先渲染首批 ${FIRST_BATCH_SIZE} 页`);
-        
-        // 1. 渲染首批页面，获取 numPages 和 pdfSize
-        const firstBatchResult = await pool.run({
-            pdfUrl,
-            pageNums: Array.from({ length: FIRST_BATCH_SIZE }, (_, i) => i + 1),
-            globalPadId: this.globalPadId,
-            uploadToCos,
-        });
-        
-        if (!firstBatchResult.success) {
-            throw new Error(firstBatchResult.error || '首批渲染失败');
-        }
-        
-        const { numPages, pdfSize } = firstBatchResult.metrics;
-        const firstResults = firstBatchResult.results || [];
-        
-        // 首张图片完成事件
-        if (firstResults.length > 0 && this.requestTracker) {
-            const ttffMs = Date.now() - this.requestTracker.startTime;
-            this.requestTracker.event('firstImageReady', { 
-                pageNum: firstResults[0].pageNum, 
-                ttffMs, 
-                mode: 'optimized-all' 
-            });
-        }
-        
-        this.log('info', `📊 总页数: ${numPages}，首批完成 ${firstResults.length} 页`);
-        
-        // 2. 如果只有 6 页或更少，直接返回
-        if (numPages <= FIRST_BATCH_SIZE) {
-            return { results: firstResults, numPages, pdfSize };
-        }
-        
-        // 3. 渲染剩余页面
-        const remainingPages = Array.from(
-            { length: numPages - FIRST_BATCH_SIZE }, 
-            (_, i) => i + FIRST_BATCH_SIZE + 1
-        );
-        
-        this.log('info', `📝 追加渲染剩余 ${remainingPages.length} 页`);
-        
-        // 分批渲染剩余页面
-        const remainingResults = await this.renderRemainingPages(pdfUrl, remainingPages, uploadToCos, pool);
-        
-        // 合并所有结果
-        const allResults = [...firstResults, ...remainingResults].sort((a, b) => a.pageNum - b.pageNum);
-        
-        return { results: allResults, numPages, pdfSize };
-    }
-
-    /**
-     * 渲染剩余页面（用于 "all" 请求）
-     */
-    async renderRemainingPages(pdfUrl, pages, uploadToCos, pool) {
-        // 计算每个 Worker 处理的页数
-        const pagesPerWorker = Math.max(6, Math.ceil(pages.length / 4));
-        
-        // 将页面分成多个批次
-        const batches = [];
-        for (let i = 0; i < pages.length; i += pagesPerWorker) {
-            batches.push(pages.slice(i, i + pagesPerWorker));
-        }
-        
-        this.log('info', `分配 ${pages.length} 页到 ${batches.length} 个 Worker`);
-        
-        // 并行提交所有 Worker 任务
-        const batchPromises = batches.map((batchPages, batchIndex) => {
+        // 并行执行
+        const batchPromises = batches.map((batchPageNums, batchIndex) => {
             return pool.run({
-                pdfUrl,
-                pageNums: batchPages,
+                pdfUrl: pdfPath,
+                pageNums: batchPageNums,
                 globalPadId: this.globalPadId,
                 uploadToCos,
             }).then(result => {
-                this.log('debug', `Worker ${batchIndex} 完成，渲染 ${result.metrics?.renderedCount || 0} 页`);
-                return result.results || [];
+                this.log('debug', `剩余批次 ${batchIndex} 完成: ${result.metrics?.renderedCount || 0} 页`);
+                this.collectWorkerMetrics(result.metrics);
+                return result;
             }).catch(err => {
-                this.log('error', `Worker ${batchIndex} 失败: ${err.message}`);
-                return batchPages.map(pageNum => ({
-                    pageNum,
+                this.log('error', `剩余批次 ${batchIndex} 失败: ${err.message}`);
+                return {
                     success: false,
                     error: err.message,
-                }));
+                    results: batchPageNums.map(pageNum => ({
+                        pageNum,
+                        success: false,
+                        error: err.message,
+                    })),
+                };
             });
         });
-        
-        const batchResults = await Promise.all(batchPromises);
-        return batchResults.flat();
-    }
 
-    /**
-     * 渲染指定页码（并行获取 numPages + pdfSize）
-     */
-    async renderSpecificPages(pdfUrl, pages) {
-        const pool = getWorkerPool();
-        const uploadToCos = !IS_DEV;
+        const batchResults = await Promise.all(batchPromises);
         
-        // 去重并排序
-        const uniquePages = [...new Set(pages)].filter(p => p >= 1).sort((a, b) => a - b);
-        
-        this.log('info', `🎯 渲染指定页码: [${uniquePages.join(', ')}]`);
-        
-        const result = await pool.run({
-            pdfUrl,
-            pageNums: uniquePages,
-            globalPadId: this.globalPadId,
-            uploadToCos,
-        });
-        
-        if (!result.success) {
-            throw new Error(result.error || '渲染失败');
+        // 收集结果
+        const results = [];
+        for (const result of batchResults) {
+            if (result.results?.length > 0) {
+                results.push(...result.results);
+            }
         }
         
-        const { numPages, pdfSize } = result.metrics;
-        
-        // 首张图片完成事件
-        if (result.results?.length > 0 && this.requestTracker) {
-            const ttffMs = Date.now() - this.requestTracker.startTime;
-            this.requestTracker.event('firstImageReady', { 
-                pageNum: result.results[0].pageNum, 
-                ttffMs, 
-                mode: 'specific-pages' 
-            });
-        }
-        
-        return { results: result.results || [], numPages, pdfSize };
+        return results;
     }
 
     /**
@@ -323,7 +279,7 @@ class Pdf2Img {
             
             const outputPath = path.join(OUTPUT_DIR, `page_${result.pageNum}.webp`);
             fs.writeFileSync(outputPath, Buffer.from(result.buffer));
-            this.log('debug', `✅ 页面 ${result.pageNum} 已保存至: ${outputPath}`);
+            this.log('debug', `页面 ${result.pageNum} 已保存至: ${outputPath}`);
             
             savedResults.push({
                 pageNum: result.pageNum,
@@ -351,18 +307,90 @@ class Pdf2Img {
     }
 
     /**
-     * 日志输出
+     * 日志输出（使用统一日志模块）
      */
-    log(level, message) {
-        const prefix = `[${this.globalPadId}]`;
-        if (level === 'error') {
-            console.error(prefix, message);
-        } else if (level === 'warn') {
-            console.warn(prefix, message);
-        } else if (level === 'debug' && process.env.DEBUG) {
-            console.log(prefix, message);
-        } else if (level === 'info') {
-            console.log(prefix, message);
+    log(level, message, data) {
+        this.logger[level]?.(message, data);
+    }
+
+    /**
+     * 收集 Worker 返回的指标到 requestTracker
+     */
+    collectWorkerMetrics(workerMetrics) {
+        if (!this.requestTracker || !workerMetrics) return;
+        
+        // 收集分片加载指标
+        if (workerMetrics.rangeStats) {
+            const stats = workerMetrics.rangeStats;
+            if (stats.requestCount > 0) {
+                this.requestTracker.rangeLoaderMetrics = this.requestTracker.rangeLoaderMetrics || {
+                    requests: 0,
+                    bytes: 0,
+                    times: [],
+                };
+                this.requestTracker.rangeLoaderMetrics.requests += stats.requestCount;
+                this.requestTracker.rangeLoaderMetrics.bytes += stats.totalBytes;
+                if (stats.avgRequestTime) {
+                    this.requestTracker.rangeLoaderMetrics.times.push(stats.avgRequestTime);
+                }
+            }
+        }
+        
+        // 收集每页渲染指标
+        if (workerMetrics.pageMetrics && workerMetrics.pageMetrics.length > 0) {
+            for (const page of workerMetrics.pageMetrics) {
+                if (page.timing) {
+                    this.requestTracker.recordPageRender(
+                        page.pageNum,
+                        page.timing.total,
+                        page.success,
+                        {
+                            width: page.width,
+                            height: page.height,
+                            scale: page.scale,
+                            getPage: page.timing.getPage,
+                            render: page.timing.render,
+                            encode: page.timing.encode,
+                            upload: page.timing.upload,
+                        }
+                    );
+                }
+            }
+        }
+        
+        // 记录 Worker 任务
+        if (workerMetrics.renderedCount > 0) {
+            this.requestTracker.recordWorkerTask(
+                workerMetrics.renderedCount,
+                0,
+                workerMetrics.renderTime || 0,
+                true
+            );
+        }
+        
+        // 测试/开发环境：输出详细 Worker 指标
+        if (IS_DEV || IS_TEST) {
+            this.logger.perf('Worker指标', {
+                pdfSize: `${(workerMetrics.pdfSize / 1024 / 1024).toFixed(2)}MB`,
+                numPages: workerMetrics.numPages,
+                renderedCount: workerMetrics.renderedCount,
+                timing: {
+                    info: workerMetrics.infoTime,
+                    parse: workerMetrics.parseTime,
+                    render: workerMetrics.renderTime,
+                    total: workerMetrics.totalTime,
+                },
+                rangeStats: workerMetrics.rangeStats,
+            });
+            
+            if (IS_DEV && workerMetrics.pageMetrics?.length > 0) {
+                this.logger.debug('每页渲染详情', workerMetrics.pageMetrics.map(p => ({
+                    page: p.pageNum,
+                    size: `${p.width}x${p.height}`,
+                    scale: p.scale,
+                    timing: p.timing,
+                })));
+            }
         }
     }
 
@@ -370,11 +398,6 @@ class Pdf2Img {
      * 清理资源
      */
     async destroy() {
-        // 清理精准超时句柄
-        if (this.preciseTimeoutHandle) {
-            clearTimeout(this.preciseTimeoutHandle);
-            this.preciseTimeoutHandle = null;
-        }
         this.log('debug', '实例清理完成');
     }
 }

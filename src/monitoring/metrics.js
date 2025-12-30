@@ -3,17 +3,20 @@
  * 
  * 环境变量:
  *   METRICS_ENABLED=true|false  - 是否启用指标收集（默认 true）
- *   METRICS_LOG_LEVEL=debug|info|warn|error - 日志级别（默认 info）
  *   METRICS_SAMPLE_RATE=0.0-1.0 - 采样率（默认 1.0，即全量）
+ * 
+ * 日志策略：
+ *   - IS_DEV: 输出所有日志
+ *   - IS_TEST: 输出关键日志
+ *   - 正式环境: 只输出 error
  */
 
-const METRICS_ENABLED = process.env.METRICS_ENABLED !== 'false';
-const METRICS_LOG_LEVEL = process.env.METRICS_LOG_LEVEL || 'info';
-const METRICS_SAMPLE_RATE = parseFloat(process.env.METRICS_SAMPLE_RATE) || 1.0;
+import { createLogger, IS_DEV, IS_TEST } from '../utils/logger.js';
 
-// 日志级别优先级
-const LOG_LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };
-const currentLogLevel = LOG_LEVELS[METRICS_LOG_LEVEL] || 1;
+const logger = createLogger('Metrics');
+
+const METRICS_ENABLED = process.env.METRICS_ENABLED !== 'false';
+const METRICS_SAMPLE_RATE = parseFloat(process.env.METRICS_SAMPLE_RATE) || 1.0;
 
 // 全局指标存储
 const globalMetrics = {
@@ -93,29 +96,18 @@ function shouldSample() {
 }
 
 /**
- * 日志输出（带级别控制）
+ * 日志输出（使用统一日志模块）
  */
 function log(level, ...args) {
   if (!METRICS_ENABLED) return;
-  if (LOG_LEVELS[level] < currentLogLevel) return;
   
-  const prefix = `[Metrics:${level.toUpperCase()}]`;
-  const timestamp = new Date().toISOString();
+  // 根据环境控制日志级别
+  if (level === 'debug' && !IS_DEV) return;
+  if (level === 'info' && !IS_DEV && !IS_TEST) return;
+  if (level === 'warn' && !IS_DEV && !IS_TEST) return;
+  // error 始终输出
   
-  switch (level) {
-    case 'debug':
-      console.debug(prefix, timestamp, ...args);
-      break;
-    case 'info':
-      console.log(prefix, timestamp, ...args);
-      break;
-    case 'warn':
-      console.warn(prefix, timestamp, ...args);
-      break;
-    case 'error':
-      console.error(prefix, timestamp, ...args);
-      break;
-  }
+  logger[level]?.(...args);
 }
 
 /**
@@ -590,7 +582,6 @@ if (METRICS_ENABLED) {
 
 export {
   METRICS_ENABLED,
-  METRICS_LOG_LEVEL,
   METRICS_SAMPLE_RATE,
   createRequestTracker,
   getMetricsSummary,

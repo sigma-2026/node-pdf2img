@@ -9,6 +9,9 @@
  */
 
 import COS from 'cos-nodejs-sdk-v5';
+import { createLogger } from '../utils/logger.js';
+
+const logger = createLogger('COS');
 
 // ==================== 配置 ====================
 
@@ -74,7 +77,7 @@ export async function getCosInstance() {
             cosInstance = new COS({ Credentials: cred });
             return cosInstance;
         } catch (error) {
-            console.error('[COS] 初始化失败:', error.message);
+            logger.error(`初始化失败: ${error.message}`);
             return null;
         }
     })();
@@ -111,7 +114,7 @@ export async function uploadFile(cos, buffer, key, contentType = 'image/webp', r
                     // 判断是否可重试
                     if (currentAttempt < retries && isRetryableError(err)) {
                         const retryDelay = delay * Math.pow(2, currentAttempt - 1); // 指数退避
-                        console.warn(`[COS] 上传失败 ${key}, 尝试 ${currentAttempt}/${retries}. ${retryDelay}ms 后重试...`, err.code || err.message);
+                        logger.warn(`上传失败 ${key}, 尝试 ${currentAttempt}/${retries}. ${retryDelay}ms 后重试... ${err.code || err.message}`);
                         setTimeout(() => attempt(currentAttempt + 1), retryDelay);
                     } else {
                         reject(err);
@@ -147,7 +150,7 @@ export async function uploadFiles(files) {
                 await uploadFile(cos, buffer, key, contentType);
                 return { key, success: true };
             } catch (error) {
-                console.error(`[COS] 上传失败 ${key}:`, error.message);
+                logger.error(`上传失败 ${key}: ${error.message}`);
                 return { key, success: false, error: error.message };
             }
         })
@@ -190,7 +193,7 @@ export async function uploadRenderedPages(pages, globalPadId) {
                     success: true,
                 };
             } catch (error) {
-                console.error(`[COS] 上传页面 ${page.pageNum} 失败:`, error.message);
+                logger.error(`上传页面 ${page.pageNum} 失败: ${error.message}`);
                 return {
                     pageNum: page.pageNum,
                     width: page.width,

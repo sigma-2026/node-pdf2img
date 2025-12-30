@@ -4,6 +4,10 @@
  * 所有可调参数集中管理，支持环境变量覆盖
  */
 
+import { createLogger, IS_DEV } from '../utils/logger.js';
+
+const logger = createLogger('Config');
+
 // ==================== 分片加载配置 ====================
 // 分片大小（字节）- 根据文件大小动态调整
 export const CHUNK_SIZE_CONFIG = {
@@ -163,16 +167,18 @@ export function getRenderScale(width, height) {
 }
 
 /**
- * 打印当前配置（用于调试）
+ * 打印当前配置（仅开发环境）
  */
 export function printConfig() {
-  console.log('=== PDF2IMG 配置 ===');
-  console.log('分片配置:', CHUNK_SIZE_CONFIG);
-  console.log('Range并发配置:', RANGE_CONFIG);
-  console.log('超时配置:', TIMEOUT_CONFIG);
-  console.log('重试配置:', RETRY_CONFIG);
-  console.log('渲染配置:', RENDER_CONFIG);
-  console.log('并发配置:', CONCURRENCY_CONFIG);
-  console.log('内存配置:', MEMORY_CONFIG);
-  console.log('==================');
+  if (!IS_DEV) return;
+  
+  logger.debug('=== PDF2IMG 配置 ===');
+  logger.debug('分片配置:', CHUNK_SIZE_CONFIG);
+  logger.debug('Range并发配置:', RANGE_CONFIG);
+  logger.debug('超时配置:', TIMEOUT_CONFIG);
+  logger.debug('重试配置:', RETRY_CONFIG);
+  logger.debug('渲染配置:', RENDER_CONFIG);
+  logger.debug('并发配置:', CONCURRENCY_CONFIG);
+  logger.debug('内存配置:', MEMORY_CONFIG);
+  logger.debug('==================');
 }
