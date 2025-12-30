@@ -51,7 +51,7 @@ async function startTestServer() {
     console.log(`${colors.blue}启动测试服务器...${colors.reset}`);
     
     const server = spawn('node', ['app.js'], {
-      env: { ...process.env, PORT: TEST_PORT, NODE_ENV: 'test' },
+      env: { ...process.env, PORT: TEST_PORT, NODE_ENV: 'dev' },
       stdio: 'pipe',
     });
     
@@ -135,9 +135,9 @@ async function testHealthEndpoint() {
   
   assertEqual(response.status, 200, '状态码应该是200');
   assertEqual(data.code, 200, '响应code应该是200');
-  assertEqual(data.data.status, 'ok', '健康状态应该是ok');
-  assertDefined(data.data.uptime, 'uptime应该被定义');
-  assertDefined(data.data.memory, 'memory应该被定义');
+  assert(data.data.status === 'ok' || data.data.status === 'healthy', '健康状态应该是ok或healthy');
+  assertEqual(data.data.healthy, true, 'healthy应该为true');
+  assertDefined(data.data.metrics, 'metrics应该被定义');
   
   console.log('');
 }

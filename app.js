@@ -1,11 +1,11 @@
 import { config } from "dotenv";
-import apiRouter from "./src/router.js";
+import apiRouter from "./src/middleware/router.js";
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
-import { IS_DEV } from "./src/env.js";
+import { IS_DEV } from "./src/core/pdf2img.js";
 import { registerTestLocalRoute } from './src/test-local-route.js';
-import { timeoutMiddleware, getTimeoutConfig } from './src/timeout-middleware.js';
+import { timeoutMiddleware, getTimeoutConfig } from './src/middleware/timeout-middleware.js';
 
 // 获取当前模块路径
 const __filename = fileURLToPath(import.meta.url);
@@ -29,24 +29,27 @@ console.log(`========== 接口超时配置 ==========`);
 console.log(`超时时间: ${timeoutConfig.timeoutSeconds}秒 (${timeoutConfig.timeout}ms)`);
 console.log(`===================================`);
 
-// ========== 核心中间件 ==========
-// 1. 请求超时中间件（40秒超时）
-app.use(timeoutMiddleware());
-
 // ========== 基础中间件 ==========
 app.use(express.json());
 // 处理表单数据
 app.use(express.urlencoded({ extended: true }));
 
+// ========== 核心中间件 ==========
+// 1. 请求超时中间件（基于请求体动态估算，仅在 body 已解析后生效）
+app.use(timeoutMiddleware());
+
 // 关键配置：静态资源服务支持 Range 请求
 app.use("/static", (req, res, next) => {
-    // 打印访问路径
-    console.log({
-        method: req.method,
-        url: req.originalUrl,
-        range: req.headers.range,
-        contentLength: req.headers["content-length"],
-    });
+    // Range 请求量很大，默认不打印，避免 stdout 拖垮性能
+    if (process.env.STATIC_LOG === 'true') {
+        console.log({
+            method: req.method,
+            url: req.originalUrl,
+            range: req.headers.range,
+            contentLength: req.headers["content-length"],
+        });
+    }
+
     // 显式调用静态资源中间件
     express.static(path.join(__dirname, "static"), {
         setHeaders: (res, filePath, stat) => {

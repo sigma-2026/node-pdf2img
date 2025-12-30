@@ -1,6 +1,6 @@
 import path from 'path'
 import fs from 'fs'
-import { createExportImage } from './pdf2img.js'
+import { createExportImage } from './core/pdf2img.js'
 import { fileURLToPath } from 'url'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -45,7 +45,7 @@ export function registerTestLocalRoute (app, PORT) {
    * }
    */
   app.get('/test-local', async (req, res) => {
-    global.begin = Date.now()
+    const startTime = Date.now()
     console.log('触发本地测试接口: /test-local')
 
     // 1. 定义测试参数
@@ -91,6 +91,7 @@ export function registerTestLocalRoute (app, PORT) {
       })
     } catch (error) {
       console.error('❌ 本地测试时发生错误:', error)
+      console.log(`本地测试耗时: ${Date.now() - startTime}ms`)
       res.status(500).send({
         code: 500,
         data: null,
