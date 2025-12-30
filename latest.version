@@ -1,2 +1,15 @@
-线上版本：csighub.tencentyun.com/pdf-developer/pdf2img:pdf2img:202512012006
-优化版本：csighub.tencentyun.com/pdf-developer/pdf2img:202512031433
+原始版本：csighub.tencentyun.com/pdf-developer/pdf2img:pdf2img:202512012006
+
+调度优化版本：csighub.tencentyun.com/pdf-developer/pdf2img:202512031433 （线上）
+
+存在问题： encode image/webp output failed\
+
+修复encode image 版本:csighub.tencentyun.com/pdf-developer/pdf2img:202512051114
+
+存在问题： 耗时增加，吞吐量降低，webp太大：Processed image is too large for the WebP format
+
+案例：
+{
+    "url": "https://cos.ap-guangzhou.myqcloud.com/weboffice-docs-importexport-1-prod-1251316161/pdf/c20b915636b2444fb9b0f6859a5577e7/ExZWUtqkSkhI?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIDfClHeoskNsCKDtNiuy34ziWFqmZBdwKf%2F20251205%2Fap-guangzhou%2Fs3%2Faws4_request&X-Amz-Date=20251205T032851Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=5cbf6c151eb254cbb574312ab6a2927d8b287380e52b0442d76a4fc5aac6e961",
+    "globalPadId": "ExZWUtqkSkhI"
+}
