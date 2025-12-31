@@ -193,46 +193,47 @@ export class RangeLoader extends PDFDataRangeTransport {
 
 // ==================== 工具函数 ====================
 
+// 小文件阈值：小于此值直接全量下载
+const SMALL_FILE_THRESHOLD = parseInt(process.env.SMALL_FILE_THRESHOLD) || 2 * 1024 * 1024; // 2MB
+
+// 探测请求大小：用于获取文件大小，同时作为大文件的 initialData
+const PROBE_SIZE = parseInt(process.env.PROBE_SIZE) || 20 * 1024 - 1; // 20KB - 1（Range 是闭区间）
+
 /**
- * 获取 PDF 文件信息（大小和初始数据）
+ * 智能获取 PDF 文件（根据文件大小选择最优策略）
  * 
- * 优化：单次 Range 请求同时获取文件大小和初始数据
- * - 请求前 256KB 数据（覆盖大部分 PDF 的元数据区域）
- * - 从 Content-Range 响应头获取文件总大小
- * - 减少一次 HTTP 请求
- * - 支持重试机制
+ * 优化策略：
+ * 1. 发送一个小的 Range 请求（20KB），从 Content-Range 获取文件总大小
+ * 2. 如果文件 <= 2MB（小文件），直接全量下载
+ * 3. 如果文件 > 2MB（大文件），这 20KB 数据作为 initialData 给 RangeLoader
  * 
- * 优化说明：
- * - 从 64KB 增大到 256KB，可有效覆盖复杂 PDF 的文件头和 xref 表
- * - 避免 pdf.js 解析初始数据后立即发起第二次分片请求
- * - 对现代网络几乎无感，但可减少几十到上百毫秒的延迟
+ * 这样：
+ * - 小文件：20KB Range + 全量下载 = 2 次请求，第一次开销很小
+ * - 大文件：20KB Range（作为 initialData）+ 后续分片 = 比 HEAD + Range 少 1 次请求
  * 
  * @param {string} pdfUrl - PDF 文件 URL
- * @returns {Promise<{pdfSize: number, initialData: ArrayBuffer}>}
+ * @returns {Promise<{pdfSize: number, initialData: ArrayBuffer, fullData: ArrayBuffer|null, isSmallFile: boolean}>}
  */
 export async function getPdfInfo(pdfUrl, retries = RANGE_MAX_RETRIES) {
-    // 单次 Range 请求：获取前 256KB + 文件总大小
-    // 优化：从 64KB 增大到 256KB，覆盖更多元数据
-    const INITIAL_SIZE = parseInt(process.env.INITIAL_DATA_SIZE) || 262143; // 256KB - 1（Range 是闭区间）
-    
     try {
+        // 1. 发送小的 Range 请求探测文件大小
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), RANGE_TIMEOUT);
         
-        const response = await fetch(pdfUrl, {
-            headers: { Range: `bytes=0-${INITIAL_SIZE}` },
+        const probeResponse = await fetch(pdfUrl, {
+            headers: { Range: `bytes=0-${PROBE_SIZE}` },
             signal: controller.signal,
         });
         
         clearTimeout(timeoutId);
         
-        if (!response.ok && response.status !== 206) {
-            throw new Error(`获取文件信息失败: ${response.status}`);
+        if (!probeResponse.ok && probeResponse.status !== 206) {
+            throw new Error(`获取文件信息失败: ${probeResponse.status}`);
         }
         
         // 从 Content-Range 获取文件总大小
-        // 格式: "bytes 0-65535/1234567"
-        const contentRange = response.headers.get('Content-Range');
+        // 格式: "bytes 0-20479/1234567"
+        const contentRange = probeResponse.headers.get('Content-Range');
         let pdfSize = 0;
         
         if (contentRange) {
@@ -242,18 +243,49 @@ export async function getPdfInfo(pdfUrl, retries = RANGE_MAX_RETRIES) {
             }
         }
         
-        // 如果没有 Content-Range（服务器不支持 Range），尝试从 Content-Length 获取
+        // 如果没有 Content-Range（服务器返回了完整文件），从 Content-Length 获取
         if (!pdfSize) {
-            pdfSize = parseInt(response.headers.get('Content-Length') || '0', 10);
+            pdfSize = parseInt(probeResponse.headers.get('Content-Length') || '0', 10);
         }
         
         if (!pdfSize) {
             throw new Error('无法获取文件大小，服务器可能不支持 Range 请求');
         }
         
-        const initialData = await response.arrayBuffer();
+        const probeData = await probeResponse.arrayBuffer();
         
-        return { pdfSize, initialData };
+        // 2. 根据文件大小选择策略
+        const isSmallFile = pdfSize <= SMALL_FILE_THRESHOLD;
+        
+        // 检查探测数据是否已包含完整文件
+        const isComplete = probeData.byteLength >= pdfSize;
+        
+        if (isComplete) {
+            // 文件 <= 20KB，探测请求已包含完整文件
+            return {
+                pdfSize,
+                initialData: probeData,
+                fullData: probeData,
+                isSmallFile: true,
+            };
+        } else if (isSmallFile) {
+            // 小文件（20KB < size <= 2MB）：下载完整文件
+            const fullData = await downloadFullPdf(pdfUrl);
+            return {
+                pdfSize,
+                initialData: probeData,  // 保留探测数据（虽然不会用到）
+                fullData,
+                isSmallFile: true,
+            };
+        } else {
+            // 大文件：探测数据作为 initialData
+            return {
+                pdfSize,
+                initialData: probeData,
+                fullData: null,
+                isSmallFile: false,
+            };
+        }
     } catch (error) {
         // 判断是否可重试的错误
         const isRetryable = error.name === 'AbortError' || 
@@ -267,6 +299,45 @@ export async function getPdfInfo(pdfUrl, retries = RANGE_MAX_RETRIES) {
             const delay = RANGE_RETRY_DELAY * (RANGE_MAX_RETRIES - retries + 1);
             await new Promise(resolve => setTimeout(resolve, delay));
             return getPdfInfo(pdfUrl, retries - 1);
+        }
+        
+        throw error;
+    }
+}
+
+/**
+ * 下载完整 PDF 文件（用于小文件优化）
+ * 
+ * @param {string} pdfUrl - PDF 文件 URL
+ * @returns {Promise<ArrayBuffer>}
+ */
+export async function downloadFullPdf(pdfUrl, retries = RANGE_MAX_RETRIES) {
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), RANGE_TIMEOUT);
+        
+        const response = await fetch(pdfUrl, {
+            signal: controller.signal,
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+            throw new Error(`下载 PDF 失败: ${response.status}`);
+        }
+        
+        return await response.arrayBuffer();
+    } catch (error) {
+        const isRetryable = error.name === 'AbortError' || 
+            error.cause?.code === 'ECONNRESET' ||
+            error.cause?.code === 'ECONNREFUSED' ||
+            error.cause?.code === 'UND_ERR_SOCKET' ||
+            error.message?.includes('fetch failed');
+        
+        if (isRetryable && retries > 0) {
+            const delay = RANGE_RETRY_DELAY * (RANGE_MAX_RETRIES - retries + 1);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            return downloadFullPdf(pdfUrl, retries - 1);
         }
         
         throw error;

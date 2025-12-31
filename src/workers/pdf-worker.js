@@ -50,6 +50,8 @@ try {
 
 const CMAP_URL = path.join(__dirname, '../../node_modules/pdfjs-dist/cmaps/');
 const STANDARD_FONT_DATA_URL = path.join(__dirname, '../../node_modules/pdfjs-dist/standard_fonts/');
+// wasm 文件路径（用于 openjpeg 和 qcms）
+const WASM_URL = 'file://' + path.join(__dirname, '../../node_modules/pdfjs-dist/wasm/');
 
 // ==================== 渲染配置 ====================
 
@@ -252,24 +254,53 @@ export default async function processPages({
             throw new Error('必须提供 pdfUrl');
         }
         
-        // 1. 使用 RangeLoader 分片加载 PDF
+        // 1. 智能获取 PDF 文件（根据文件大小选择最优策略）
         const parseStart = Date.now();
         
         const infoStart = Date.now();
-        const { pdfSize, initialData } = await getPdfInfo(pdfUrl);
+        const { pdfSize, initialData, fullData, isSmallFile } = await getPdfInfo(pdfUrl);
         metrics.infoTime = Date.now() - infoStart;
         metrics.pdfSize = pdfSize;
         
-        rangeLoader = new RangeLoader(pdfSize, initialData, pdfUrl);
+        // 2. 根据文件大小选择加载策略
+        let loadingTask;
         
-        const loadingTask = getDocument({
-            range: rangeLoader,
-            cMapUrl: CMAP_URL,
-            cMapPacked: true,
-            standardFontDataUrl: STANDARD_FONT_DATA_URL,
-            rangeChunkSize: RANGE_CONFIG.CHUNK_SIZE,
-            disableAutoFetch: true,
-        });
+        if (isSmallFile) {
+            // 小文件优化：使用已下载的完整数据
+            logger.debug(`小文件模式: ${(pdfSize / 1024 / 1024).toFixed(2)}MB，全量下载`);
+            
+            loadingTask = getDocument({
+                data: new Uint8Array(fullData),
+                cMapUrl: CMAP_URL,
+                cMapPacked: true,
+                standardFontDataUrl: STANDARD_FONT_DATA_URL,
+                wasmUrl: WASM_URL,
+            });
+            
+            // 小文件模式下的统计信息
+            metrics.rangeStats = {
+                requestCount: 1,  // HEAD 不计入（无数据传输），只计全量下载
+                totalBytes: fullData.byteLength,
+                totalBytesMB: (fullData.byteLength / 1024 / 1024).toFixed(2),
+                avgRequestTime: metrics.infoTime,
+                mode: 'full-download',
+            };
+        } else {
+            // 大文件：使用 RangeLoader 分片加载
+            logger.debug(`分片加载模式: ${(pdfSize / 1024 / 1024).toFixed(2)}MB`);
+            
+            rangeLoader = new RangeLoader(pdfSize, initialData, pdfUrl);
+            
+            loadingTask = getDocument({
+                range: rangeLoader,
+                cMapUrl: CMAP_URL,
+                cMapPacked: true,
+                standardFontDataUrl: STANDARD_FONT_DATA_URL,
+                wasmUrl: WASM_URL,
+                rangeChunkSize: RANGE_CONFIG.CHUNK_SIZE,
+                disableAutoFetch: true,
+            });
+        }
         
         pdfDocument = await loadingTask.promise;
         
@@ -280,7 +311,10 @@ export default async function processPages({
         // 如果没有指定页码，只返回页数信息
         if (!pageNums || pageNums.length === 0) {
             metrics.totalTime = Date.now() - startTime;
-            metrics.rangeStats = rangeLoader?.getStats() || null;
+            // 小文件模式下 rangeStats 已在上面设置，大文件模式从 rangeLoader 获取
+            if (!metrics.rangeStats) {
+                metrics.rangeStats = rangeLoader?.getStats() || null;
+            }
             
             return {
                 success: true,
@@ -319,7 +353,10 @@ export default async function processPages({
         
         metrics.renderTime = Date.now() - renderStart;
         metrics.totalTime = Date.now() - startTime;
-        metrics.rangeStats = rangeLoader?.getStats() || null;
+        // 小文件模式下 rangeStats 已在上面设置，大文件模式从 rangeLoader 获取
+        if (!metrics.rangeStats) {
+            metrics.rangeStats = rangeLoader?.getStats() || null;
+        }
         
         // 开发/测试环境：输出详细日志
         if (IS_DEV || IS_TEST) {
