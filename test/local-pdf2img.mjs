@@ -36,7 +36,11 @@ const TARGET_RENDER_WIDTH = parseInt(process.env.TARGET_RENDER_WIDTH) || 1280;
 const MAX_RENDER_SCALE = parseFloat(process.env.MAX_RENDER_SCALE) || 4.0;
 const XLARGE_PAGE_THRESHOLD = parseInt(process.env.XLARGE_PAGE_THRESHOLD) || 4000 * 4000;
 const XLARGE_PAGE_SCALE = parseFloat(process.env.XLARGE_PAGE_SCALE) || 0.75;
-const WEBP_QUALITY = parseInt(process.env.WEBP_QUALITY) || 80;
+
+// WebP 编码配置（与 pdf-worker.js 保持一致）
+const WEBP_QUALITY = parseInt(process.env.WEBP_QUALITY) || 70;
+const WEBP_ALPHA_QUALITY = parseInt(process.env.WEBP_ALPHA_QUALITY) || 70;
+const WEBP_EFFORT = parseInt(process.env.WEBP_EFFORT) || 2;
 
 // ==================== 日志工具 ====================
 
@@ -105,8 +109,9 @@ async function encodeWithSharp(data, width, height) {
         },
     })
     .webp({ 
-        quality: WEBP_QUALITY,
-        alphaQuality: 85,
+        quality: WEBP_QUALITY,             // 默认 70
+        alphaQuality: WEBP_ALPHA_QUALITY,  // 默认 70
+        effort: WEBP_EFFORT,               // 默认 2
         smartSubsample: true,
     })
     .toBuffer();

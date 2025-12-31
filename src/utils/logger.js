@@ -42,7 +42,7 @@ const LOG_LEVELS = {
 // 根据环境确定最低日志级别
 function getMinLogLevel() {
     if (IS_DEV) return LOG_LEVELS.debug;   // 开发环境：输出所有
-    if (IS_TEST) return LOG_LEVELS.info;   // 测试环境：info 及以上
+    if (IS_TEST) return LOG_LEVELS.debug;  // 测试环境：也输出 debug
     return LOG_LEVELS.error;               // 正式环境：只输出 error
 }
 

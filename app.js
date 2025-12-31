@@ -26,7 +26,7 @@ const PORT = Number(process.env.PORT) || 3000;
 // 打印超时配置
 const timeoutConfig = getTimeoutConfig();
 console.log(`========== 接口超时配置 ==========`);
-console.log(`超时时间: ${timeoutConfig.timeoutSeconds}秒 (${timeoutConfig.timeout}ms)`);
+console.log(`守门超时: ${timeoutConfig.guardrailTimeoutSeconds}秒 (${timeoutConfig.guardrailTimeout}ms)`);
 console.log(`===================================`);
 
 // ========== 基础中间件 ==========

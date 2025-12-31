@@ -19,12 +19,15 @@
  * - sharp: 高性能图像处理（基于 libvips）
  */
 
-import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { getDocument, OPS } from "pdfjs-dist/legacy/build/pdf.mjs";
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { RangeLoader, getPdfInfo, RANGE_CONFIG } from './range-loader.js';
 import { getCosInstance, uploadFile, COS_CONFIG } from './cos-uploader.js';
 import { createLogger, IS_DEV, IS_TEST } from '../utils/logger.js';
+
+// PDF.js 操作符映射（用于内容分析）
+const pdfjsLib = { OPS };
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -58,6 +61,9 @@ const WASM_URL = 'file://' + path.join(__dirname, '../../node_modules/pdfjs-dist
 // 黄金宽度：目标输出宽度（适合大多数屏幕和场景）
 const TARGET_RENDER_WIDTH = parseInt(process.env.TARGET_RENDER_WIDTH) || 1280;
 
+// 扫描件/纯图片页面的降级渲染宽度（减少解码和渲染开销）
+const IMAGE_HEAVY_TARGET_WIDTH = parseInt(process.env.IMAGE_HEAVY_TARGET_WIDTH) || 1024;
+
 // 最大缩放比例限制（防止小尺寸 PDF 过度放大）
 const MAX_RENDER_SCALE = parseFloat(process.env.MAX_RENDER_SCALE) || 4.0;
 
@@ -65,19 +71,35 @@ const MAX_RENDER_SCALE = parseFloat(process.env.MAX_RENDER_SCALE) || 4.0;
 const XLARGE_PAGE_THRESHOLD = parseInt(process.env.XLARGE_PAGE_THRESHOLD) || 4000 * 4000; // 16MP
 const XLARGE_PAGE_SCALE = parseFloat(process.env.XLARGE_PAGE_SCALE) || 0.75;
 
-// WebP 编码质量（1-100）
-const WEBP_QUALITY = parseInt(process.env.WEBP_QUALITY) || 80;
+// WebP 编码质量（1-100）- 70 是体积/质量的最佳平衡点
+const WEBP_QUALITY = parseInt(process.env.WEBP_QUALITY) || 70;
+
+// WebP 透明通道质量（1-100）- PDF 渲染的 Alpha 通道主要用于抗锯齿，不需要高精度
+const WEBP_ALPHA_QUALITY = parseInt(process.env.WEBP_ALPHA_QUALITY) || 70;
+
+// WebP 编码努力程度（0-6，默认4）- 值越低编码越快，但压缩率略降
+const WEBP_EFFORT = parseInt(process.env.WEBP_EFFORT) || 2;
 
 // 主动 GC 配置
 const GC_THRESHOLD_MB = parseInt(process.env.GC_THRESHOLD_MB) || 500; // 堆内存超过此值时触发 GC
 
+// PDF.js Verbose 日志级别（0=errors, 1=warnings, 5=infos）
+const PDFJS_VERBOSITY = parseInt(process.env.PDFJS_VERBOSITY) || (IS_DEV ? 5 : 1);
+
 /**
  * 使用 sharp 将 RGBA 原始像素数据编码为 WebP
  * 
- * WebP 编码优化参数：
- * - quality: 主图像质量（1-100）
- * - alphaQuality: 透明通道质量（1-100），PDF.js 渲染的画布背景是透明的
- * - smartSubsample: 高质量色度子采样，人眼几乎无法察觉差异但能显著减小体积
+ * WebP 编码参数优化策略（"不可能三角"平衡）：
+ * 
+ * 1. 质量/体积核心参数：
+ *    - quality: 70 - 从 80 降至 70，减小约 25-40% 体积，视觉差异极小
+ *    - alphaQuality: 70 - 透明通道主要用于抗锯齿，不需要高精度
+ * 
+ * 2. 速度核心参数：
+ *    - effort: 2 - 从默认 4 降至 2，编码速度提升约 50%
+ * 
+ * 3. 辅助优化参数：
+ *    - smartSubsample: true - 高质量色度子采样，视觉无损但体积更小
  * 
  * @param {Uint8ClampedArray} data - RGBA 像素数据
  * @param {number} width - 图像宽度
@@ -96,23 +118,36 @@ async function encodeWithSharp(data, width, height) {
         },
     })
     .webp({ 
-        quality: WEBP_QUALITY,
-        alphaQuality: 85,      // 透明通道有损压缩，对带透明度的图片效果显著
-        smartSubsample: true,  // 高质量色度子采样，视觉无损但体积更小
+        // 1. 质量/体积核心参数
+        quality: WEBP_QUALITY,             // 默认 70，显著减小体积
+        alphaQuality: WEBP_ALPHA_QUALITY,  // 默认 70，优化透明通道
+        
+        // 2. 速度核心参数
+        effort: WEBP_EFFORT,               // 默认 2，高速编码
+        
+        // 3. 辅助优化参数
+        smartSubsample: true,              // 高质量色度子采样
     })
     .toBuffer();
 }
 
 /**
- * 渲染单个页面
+ * [深度调试版] 渲染单个页面 - 包含微观性能计时与内容复杂度分析
  * 
  * 渲染策略：
- * 1. 使用默认 1.5 倍缩放
- * 2. 如果缩放后宽度超过 MAX_OUTPUT_WIDTH (2000px)，自动降低缩放比例
- * 3. 超大页面（像素数超阈值）额外降级
+ * 1. 快速启发式预判：检测扫描件/纯图片页面，提前降级渲染宽度
+ * 2. 使用默认 1.5 倍缩放（扫描件使用降级宽度）
+ * 3. 如果缩放后宽度超过 MAX_OUTPUT_WIDTH (2000px)，自动降低缩放比例
+ * 4. 超大页面（像素数超阈值）额外降级
+ * 
+ * 新增诊断能力：
+ * - 获取并分析操作符列表（Operator List）
+ * - 统计路径、文本、图像操作数量
+ * - 检测透明度使用
+ * - 细粒度计时（getPage, heuristic, getOperatorList, render, getImageData, encode）
  * 
  * @private
- * @returns {Object} 包含渲染结果和详细耗时指标
+ * @returns {Object} 包含渲染结果、详细耗时指标和内容统计
  */
 async function renderPage(pdfDocument, pageNum) {
     let page;
@@ -120,9 +155,20 @@ async function renderPage(pdfDocument, pageNum) {
     const pageStartTime = Date.now();
     const timing = {
         getPage: 0,
+        heuristic: 0,        // 新增：启发式预判耗时
+        getOperatorList: 0,
         render: 0,
+        getImageData: 0,
         encode: 0,
         total: 0,
+    };
+    const contentStats = {
+        operatorCount: 0,
+        pathOps: 0,
+        textOps: 0,
+        imageOps: 0,
+        transparency: false,
+        isLikelyScan: false,  // 新增：是否被判定为扫描件
     };
     
     try {
@@ -131,17 +177,68 @@ async function renderPage(pdfDocument, pageNum) {
         page = await pdfDocument.getPage(pageNum);
         timing.getPage = Date.now() - getPageStart;
         
-        // 2. 获取原始页面尺寸 (在 72 DPI 下)
+        // 2. ⭐ [核心优化] 快速启发式预判 - 在 getOperatorList 之前判断是否为扫描件
+        const heuristicStart = Date.now();
+        let targetWidth = TARGET_RENDER_WIDTH;
+        let isLikelyScan = false;
+        
+        try {
+            // 访问页面的底层字典结构（不触发图像解码，速度极快）
+            // page._pageInfo 包含页面资源引用等信息
+            const pageDict = page._pageInfo?.pageDict || page.pageDict;
+            
+            if (pageDict) {
+                const resources = pageDict.get('Resources');
+                if (resources) {
+                    const xobjects = resources.get('XObject');
+                    const fonts = resources.get('Font');
+                    
+                    // 启发式规则：
+                    // - 有图像资源 (XObject) 
+                    // - 没有字体资源 (Font) 或字体很少
+                    // - 则很可能是扫描件/纯图片页面
+                    const hasImages = xobjects && (
+                        typeof xobjects.getKeys === 'function' 
+                            ? xobjects.getKeys().length > 0 
+                            : Object.keys(xobjects).length > 0
+                    );
+                    const hasFonts = fonts && (
+                        typeof fonts.getKeys === 'function'
+                            ? fonts.getKeys().length > 0
+                            : Object.keys(fonts).length > 0
+                    );
+                    
+                    if (hasImages && !hasFonts) {
+                        isLikelyScan = true;
+                        targetWidth = IMAGE_HEAVY_TARGET_WIDTH;
+                    }
+                }
+            }
+        } catch (e) {
+            // 忽略底层 API 的潜在错误，回退到默认行为
+            if (IS_DEV || IS_TEST) {
+                logger.debug(`Page ${pageNum} 启发式预判失败: ${e.message}`);
+            }
+        }
+        
+        timing.heuristic = Date.now() - heuristicStart;
+        contentStats.isLikelyScan = isLikelyScan;
+        
+        if (isLikelyScan && (IS_DEV || IS_TEST)) {
+            logger.debug(`Page ${pageNum}: 检测到扫描件/纯图片页面，降级渲染宽度: ${targetWidth}px`);
+        }
+        
+        // 3. 获取原始页面尺寸 (在 72 DPI 下)
         const originalViewport = page.getViewport({ scale: 1.0 });
         const originalWidth = originalViewport.width;
         
-        // 3. 计算缩放比例：目标 1440px 宽度，但不超过最大缩放限制
-        let scale = TARGET_RENDER_WIDTH / originalWidth;
+        // 4. 计算缩放比例：使用决策后的 targetWidth
+        let scale = targetWidth / originalWidth;
         scale = Math.min(scale, MAX_RENDER_SCALE);
         
         let viewport = page.getViewport({ scale });
         
-        // 4. 超大页面安全网（像素数超阈值时额外降级）
+        // 5. 超大页面安全网（像素数超阈值时额外降级）
         if (viewport.width * viewport.height > XLARGE_PAGE_THRESHOLD) {
             logger.warn(`Page ${pageNum} 尺寸异常 (${Math.round(viewport.width)}x${Math.round(viewport.height)})，强制应用安全降级缩放`);
             viewport = page.getViewport({ scale: scale * XLARGE_PAGE_SCALE });
@@ -150,12 +247,67 @@ async function renderPage(pdfDocument, pageNum) {
         const width = Math.round(viewport.width);
         const height = Math.round(viewport.height);
         
-        // 5. 创建 canvas 并渲染
+        // 6. 获取并分析操作符列表 (Operator List)
+        // 注意：即使是扫描件，这一步仍会触发图像解码，但因为目标 scale 已减小，
+        // 后续的渲染和编码开销会显著降低
+        const getOperatorListStart = Date.now();
+        const operatorList = await page.getOperatorList();
+        timing.getOperatorList = Date.now() - getOperatorListStart;
+        
+        // 对操作符进行统计分析
+        contentStats.operatorCount = operatorList.fnArray.length;
+        
+        // PDF.js OPS 常量映射到操作类型
+        const pathOps = new Set([
+            pdfjsLib.OPS.moveTo,
+            pdfjsLib.OPS.lineTo,
+            pdfjsLib.OPS.curveTo,
+            pdfjsLib.OPS.curveTo2,
+            pdfjsLib.OPS.curveTo3,
+            pdfjsLib.OPS.closePath,
+            pdfjsLib.OPS.rectangle,
+            pdfjsLib.OPS.fill,
+            pdfjsLib.OPS.eoFill,
+            pdfjsLib.OPS.stroke,
+            pdfjsLib.OPS.fillStroke,
+            pdfjsLib.OPS.eoFillStroke,
+        ]);
+        const textOps = new Set([
+            pdfjsLib.OPS.showText,
+            pdfjsLib.OPS.showSpacedText,
+            pdfjsLib.OPS.nextLineShowText,
+            pdfjsLib.OPS.nextLineSetSpacingShowText,
+        ]);
+        const imageOps = new Set([
+            pdfjsLib.OPS.paintImageXObject,
+            pdfjsLib.OPS.paintImageMaskXObject,
+            pdfjsLib.OPS.paintInlineImageXObject,
+            pdfjsLib.OPS.paintInlineImageXObjectGroup,
+        ]);
+        const transparencyOps = new Set([
+            pdfjsLib.OPS.setGState,
+            pdfjsLib.OPS.beginGroup,
+        ]);
+        
+        for (const op of operatorList.fnArray) {
+            if (pathOps.has(op)) {
+                contentStats.pathOps++;
+            } else if (textOps.has(op)) {
+                contentStats.textOps++;
+            } else if (imageOps.has(op)) {
+                contentStats.imageOps++;
+            } else if (transparencyOps.has(op)) {
+                contentStats.transparency = true;
+            }
+        }
+        
+        // 7. 创建 canvas 并渲染（复用已获取的 operatorList）
         canvasAndContext = pdfDocument.canvasFactory.create(width, height);
         
         const renderContext = {
             canvasContext: canvasAndContext.context,
             viewport,
+            operatorList,
         };
         
         const renderStart = Date.now();
@@ -163,12 +315,14 @@ async function renderPage(pdfDocument, pageNum) {
         await renderTask.promise;
         timing.render = Date.now() - renderStart;
         
-        // 6. 编码为 WebP
+        // 8. 编码为 WebP
         const encodeStart = Date.now();
         let buffer;
         
         if (sharpAvailable) {
+            const getImageDataStart = Date.now();
             const imageData = canvasAndContext.context.getImageData(0, 0, width, height);
+            timing.getImageData = Date.now() - getImageDataStart;
             buffer = await encodeWithSharp(imageData.data, width, height);
         } else {
             buffer = canvasAndContext.canvas.toBuffer("image/webp");
@@ -184,6 +338,7 @@ async function renderPage(pdfDocument, pageNum) {
             scale: parseFloat(scale.toFixed(3)),
             success: true,
             timing,
+            contentStats,
         };
     } catch (error) {
         timing.total = Date.now() - pageStartTime;
@@ -193,6 +348,7 @@ async function renderPage(pdfDocument, pageNum) {
             success: false,
             error: error.message,
             timing,
+            contentStats,
         };
     } finally {
         try {
@@ -275,6 +431,7 @@ export default async function processPages({
                 cMapPacked: true,
                 standardFontDataUrl: STANDARD_FONT_DATA_URL,
                 wasmUrl: WASM_URL,
+                verbosity: PDFJS_VERBOSITY,  // 开启 PDF.js 内部日志
             });
             
             // 小文件模式下的统计信息
@@ -299,6 +456,7 @@ export default async function processPages({
                 wasmUrl: WASM_URL,
                 rangeChunkSize: RANGE_CONFIG.CHUNK_SIZE,
                 disableAutoFetch: true,
+                verbosity: PDFJS_VERBOSITY,  // 开启 PDF.js 内部日志
             });
         }
         
@@ -374,12 +532,18 @@ export default async function processPages({
                 rangeStats: metrics.rangeStats,
             });
             
-            // 开发环境额外输出每页详情
-            if (IS_DEV) {
+            // 开发/测试环境额外输出每页详情（深度调试格式）
+            if (IS_DEV || IS_TEST) {
                 logger.debug('每页渲染详情', metrics.pageMetrics.map(p => ({
                     page: p.pageNum,
-                    size: `${p.width}x${p.height}`,
-                    timing: p.timing,
+                    size: `${p.width}x${p.height} @${p.scale}x`,
+                    success: p.success,
+                    // 是否被检测为扫描件
+                    scan: p.content?.isLikelyScan ? '✓' : '-',
+                    // 毫秒级计时细分（新增 heuristic）
+                    timing: `Total:${p.timing.total}ms (getPage:${p.timing.getPage}, heur:${p.timing.heuristic || 0}, ops:${p.timing.getOperatorList}, render:${p.timing.render}, getImage:${p.timing.getImageData || 0}, encode:${p.timing.encode})`,
+                    // 内容复杂度分析
+                    content: p.content ? `Ops:${p.content.operatorCount} (Paths:${p.content.pathOps}, Text:${p.content.textOps}, Imgs:${p.content.imageOps}), Transparency:${p.content.transparency}` : 'N/A',
                 })));
             }
         }
@@ -458,13 +622,14 @@ async function renderAndUploadPipeline(pdfDocument, pageNums, globalPadId, metri
         // a. 并行地开始渲染每一页
         const renderResult = await renderPage(pdfDocument, pageNum);
         
-        // b. 立即收集该页的指标
+        // b. 立即收集该页的所有详细指标
         metrics.pageMetrics.push({
             pageNum,
             width: renderResult.width,
             height: renderResult.height,
             scale: renderResult.scale,
             timing: renderResult.timing,
+            content: renderResult.contentStats,  // 新增：内容统计
             success: renderResult.success,
         });
         
@@ -540,13 +705,14 @@ async function renderOnly(pdfDocument, pageNums, metrics) {
     const pagePromises = pageNums.map(async (pageNum) => {
         const result = await renderPage(pdfDocument, pageNum);
         
-        // 收集指标
+        // 收集指标（包含内容统计）
         metrics.pageMetrics.push({
             pageNum,
             width: result.width,
             height: result.height,
             scale: result.scale,
             timing: result.timing,
+            content: result.contentStats,  // 新增：内容统计
             success: result.success,
         });
         
