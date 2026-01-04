@@ -1,5 +1,0 @@
-warning: pdf-renderer@0.1.0: Downloading PDFium library...
-warning: pdf-renderer@0.1.0: Downloading from: https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F7606/pdfium-linux-x64.tgz
-warning: pdf-renderer@0.1.0: PDFium library installed at: /data/code/pdf2img/native-renderer/target/debug/build/pdf-renderer-c6b8cd53a9604d29/out/pdfium/lib/libpdfium.so
-warning: pdf-renderer@0.1.0: PDFium downloaded successfully!
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.11s

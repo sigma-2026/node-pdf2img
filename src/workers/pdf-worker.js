@@ -82,7 +82,8 @@ try {
 
 const CMAP_URL = path.join(__dirname, '../../node_modules/pdfjs-dist/cmaps/');
 const STANDARD_FONT_DATA_URL = path.join(__dirname, '../../node_modules/pdfjs-dist/standard_fonts/');
-const WASM_URL = 'file://' + path.join(__dirname, '../../node_modules/pdfjs-dist/wasm/');
+// Node.js 环境下使用文件路径而非 file:// URL
+const WASM_URL = path.join(__dirname, '../../node_modules/pdfjs-dist/wasm/');
 
 // ==================== 渲染配置 ====================
 
@@ -96,6 +97,10 @@ const WEBP_ALPHA_QUALITY = parseInt(process.env.WEBP_ALPHA_QUALITY) || 70;
 const WEBP_EFFORT = parseInt(process.env.WEBP_EFFORT) || 2;
 const GC_THRESHOLD_MB = parseInt(process.env.GC_THRESHOLD_MB) || 500;
 const PDFJS_VERBOSITY = parseInt(process.env.PDFJS_VERBOSITY) || (IS_DEV ? 5 : 1);
+
+// WebP 格式限制
+const WEBP_MAX_DIMENSION = 16383;  // WebP 单边最大尺寸
+const WEBP_MAX_PIXELS = 16383 * 16383;  // WebP 最大像素数
 
 // ==================== Worker 主入口 ====================
 
@@ -653,20 +658,48 @@ async function renderPage(pdfDocument, pageNum) {
         // 计算缩放比例
         const originalViewport = page.getViewport({ scale: 1.0 });
         const originalWidth = originalViewport.width;
+        const originalHeight = originalViewport.height;
         
         let scale = targetWidth / originalWidth;
         scale = Math.min(scale, MAX_RENDER_SCALE);
         
         let viewport = page.getViewport({ scale });
         
-        // 超大页面安全网
+        // 超大页面安全网（检查像素总数）
         if (viewport.width * viewport.height > XLARGE_PAGE_THRESHOLD) {
-            logger.warn(`Page ${pageNum} 尺寸异常，强制降级`);
-            viewport = page.getViewport({ scale: scale * XLARGE_PAGE_SCALE });
+            logger.warn(`Page ${pageNum} 像素数异常 (${Math.round(viewport.width)}x${Math.round(viewport.height)})，强制降级`);
+            scale = scale * XLARGE_PAGE_SCALE;
+            viewport = page.getViewport({ scale });
         }
         
-        const width = Math.round(viewport.width);
-        const height = Math.round(viewport.height);
+        // WebP 尺寸限制检查（单边不能超过 16383）
+        let width = Math.round(viewport.width);
+        let height = Math.round(viewport.height);
+        
+        if (width > WEBP_MAX_DIMENSION || height > WEBP_MAX_DIMENSION) {
+            // 计算需要的缩放因子，确保两边都不超限
+            const widthFactor = width > WEBP_MAX_DIMENSION ? WEBP_MAX_DIMENSION / width : 1;
+            const heightFactor = height > WEBP_MAX_DIMENSION ? WEBP_MAX_DIMENSION / height : 1;
+            const limitFactor = Math.min(widthFactor, heightFactor);
+            
+            logger.warn(`Page ${pageNum} 尺寸超过 WebP 限制 (${width}x${height})，缩放至 ${(limitFactor * 100).toFixed(1)}%`);
+            
+            scale = scale * limitFactor;
+            viewport = page.getViewport({ scale });
+            width = Math.round(viewport.width);
+            height = Math.round(viewport.height);
+        }
+        
+        // 最终安全检查
+        if (width * height > WEBP_MAX_PIXELS) {
+            const pixelFactor = Math.sqrt(WEBP_MAX_PIXELS / (width * height));
+            logger.warn(`Page ${pageNum} 像素数超过 WebP 限制，进一步缩放至 ${(pixelFactor * 100).toFixed(1)}%`);
+            
+            scale = scale * pixelFactor;
+            viewport = page.getViewport({ scale });
+            width = Math.round(viewport.width);
+            height = Math.round(viewport.height);
+        }
         
         // 获取操作符列表
         const getOperatorListStart = Date.now();

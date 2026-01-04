@@ -8,6 +8,9 @@ use napi::bindgen_prelude::*;
 use pdfium_render::prelude::*;
 use std::io::Cursor;
 
+/// WebP 格式限制
+const WEBP_MAX_DIMENSION: u32 = 16383;
+
 /// PDF 渲染器
 pub struct PdfRenderer<'a> {
     pdfium: &'a Pdfium,
@@ -99,14 +102,33 @@ impl<'a> PdfRenderer<'a> {
         let mut scale = target_width / original_width;
         scale = scale.min(self.config.max_scale);
 
-        let render_width = (original_width * scale).round() as i32;
-        let render_height = (original_height * scale).round() as i32;
+        let mut render_width = (original_width * scale).round() as u32;
+        let mut render_height = (original_height * scale).round() as u32;
+
+        // WebP 尺寸限制检查（单边不能超过 16383）
+        if render_width > WEBP_MAX_DIMENSION || render_height > WEBP_MAX_DIMENSION {
+            let width_factor = if render_width > WEBP_MAX_DIMENSION {
+                WEBP_MAX_DIMENSION as f32 / render_width as f32
+            } else {
+                1.0
+            };
+            let height_factor = if render_height > WEBP_MAX_DIMENSION {
+                WEBP_MAX_DIMENSION as f32 / render_height as f32
+            } else {
+                1.0
+            };
+            let limit_factor = width_factor.min(height_factor);
+            
+            scale *= limit_factor;
+            render_width = (original_width * scale).round() as u32;
+            render_height = (original_height * scale).round() as u32;
+        }
 
         // 渲染页面为 RGBA 位图
         let bitmap = match page.render_with_config(
             &PdfRenderConfig::new()
-                .set_target_width(render_width)
-                .set_target_height(render_height)
+                .set_target_width(render_width as i32)
+                .set_target_height(render_height as i32)
                 .render_form_data(true)
                 .render_annotations(true)
         ) {
@@ -129,20 +151,61 @@ impl<'a> PdfRenderer<'a> {
         let encode_start = std::time::Instant::now();
 
         // 转换为 image crate 的格式并编码为 WebP
-        let width = bitmap.width() as u32;
-        let height = bitmap.height() as u32;
+        let actual_width = bitmap.width() as u32;
+        let actual_height = bitmap.height() as u32;
         
         // 获取 RGBA 像素数据 - as_rgba_bytes() 直接返回 Vec<u8>
         let rgba_data = bitmap.as_rgba_bytes();
 
+        // 最终尺寸检查：如果实际渲染尺寸仍超过 WebP 限制，需要缩放
+        let (final_width, final_height, final_rgba) = if actual_width > WEBP_MAX_DIMENSION || actual_height > WEBP_MAX_DIMENSION {
+            // 计算缩放因子
+            let width_factor = if actual_width > WEBP_MAX_DIMENSION {
+                WEBP_MAX_DIMENSION as f32 / actual_width as f32
+            } else {
+                1.0
+            };
+            let height_factor = if actual_height > WEBP_MAX_DIMENSION {
+                WEBP_MAX_DIMENSION as f32 / actual_height as f32
+            } else {
+                1.0
+            };
+            let limit_factor = width_factor.min(height_factor);
+            
+            let new_width = ((actual_width as f32) * limit_factor).round() as u32;
+            let new_height = ((actual_height as f32) * limit_factor).round() as u32;
+            
+            // 使用 image crate 缩放图像
+            let img: ImageBuffer<Rgba<u8>, _> = match ImageBuffer::from_raw(actual_width, actual_height, rgba_data.to_vec()) {
+                Some(img) => img,
+                None => {
+                    return PageResult {
+                        page_num,
+                        width: actual_width,
+                        height: actual_height,
+                        buffer: Buffer::from(vec![]),
+                        success: false,
+                        error: Some("Failed to create image buffer for resize".to_string()),
+                        render_time,
+                        encode_time: 0,
+                    };
+                }
+            };
+            
+            let resized = image::imageops::resize(&img, new_width, new_height, image::imageops::FilterType::Lanczos3);
+            (new_width, new_height, resized.into_raw())
+        } else {
+            (actual_width, actual_height, rgba_data.to_vec())
+        };
+
         // 编码为 WebP
-        let webp_buffer = match self.encode_webp(&rgba_data, width, height) {
+        let webp_buffer = match self.encode_webp(&final_rgba, final_width, final_height) {
             Ok(buf) => buf,
             Err(e) => {
                 return PageResult {
                     page_num,
-                    width,
-                    height,
+                    width: final_width,
+                    height: final_height,
                     buffer: Buffer::from(vec![]),
                     success: false,
                     error: Some(e),
@@ -156,8 +219,8 @@ impl<'a> PdfRenderer<'a> {
 
         PageResult {
             page_num,
-            width,
-            height,
+            width: final_width,
+            height: final_height,
             buffer: Buffer::from(webp_buffer),
             success: true,
             error: None,

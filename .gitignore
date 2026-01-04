@@ -1,3 +1,6 @@
 node_modules/
 output/
 reports/
+
+# Rust/Cargo 构建产物
+native-renderer/target/
