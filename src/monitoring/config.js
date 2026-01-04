@@ -104,7 +104,19 @@ export const RENDER_CONFIG = {
   // Native renderer 文件大小阈值（字节）
   // 小于此阈值的文件使用 native-renderer (Rust + PDFium)
   // 大于此阈值的文件使用 pdfjs + 分片加载
-  NATIVE_RENDERER_THRESHOLD: parseInt(process.env.NATIVE_RENDERER_THRESHOLD) || 3 * 1024 * 1024, // 3MB
+  NATIVE_RENDERER_THRESHOLD: parseInt(process.env.NATIVE_RENDERER_THRESHOLD) || 8 * 1024 * 1024, // 3MB
+  
+  // Native renderer 文件大小上限（字节）
+  // 超过此值强制使用 pdfjs（稳定性考虑）
+  NATIVE_RENDERER_MAX_SIZE: parseInt(process.env.NATIVE_RENDERER_MAX_SIZE) || 20 * 1024 * 1024, // 20MB
+  
+  // 扫描件判定阈值：字节/页（Bytes Per Page）
+  // 超过此值判定为扫描件/图片密集型 PDF，优先使用 native renderer
+  SCAN_BPP_THRESHOLD: parseInt(process.env.SCAN_BPP_THRESHOLD) || 250 * 1024, // 250KB/页
+  
+  // 复杂页面判定阈值：字节/页（Bytes Per Page）
+  // 在机会窗口内(3-20MB)，超过此值判定为复杂页面，优先使用 native renderer
+  COMPLEX_PAGE_BPP_THRESHOLD: parseInt(process.env.COMPLEX_PAGE_BPP_THRESHOLD) || 500 * 1024, // 500KB/页
   
   // 是否启用 native renderer（可通过环境变量禁用）
   NATIVE_RENDERER_ENABLED: process.env.NATIVE_RENDERER_ENABLED !== 'false',

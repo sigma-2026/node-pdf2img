@@ -1,25 +1,23 @@
 /**
- * PDF Worker - 核心 Worker 实现
+ * PDF Worker - 终极架构 V5 执行中心
  * 
  * 职责：
- * 1. 接收 PDF URL 和页码范围（批量处理）
- * 2. 根据文件大小自动选择渲染引擎：
- *    - 小文件 (<3MB): 使用 native-renderer (Rust + PDFium) 高性能渲染
- *    - 大文件 (>=3MB): 使用 pdfjs + RangeLoader 分片加载渲染
- * 3. 使用 sharp (libvips) 高性能编码为 WebP
- * 4. 上传 COS（生产环境）或返回 buffer（开发环境）
+ * 根据主线程的决策，执行两种渲染路径之一：
+ * 
+ * 1. Native 路径 (useNativeRenderer: true)
+ *    - 接收 pdfData (Buffer)，直接调用 native-renderer
+ *    - 适用于小文件和扫描件
+ *    - 性能最优
+ * 
+ * 2. PDF.js 路径 (useNativeRenderer: false)
+ *    - 接收 pdfUrl，使用 RangeLoader 分片加载
+ *    - 适用于大文件和文本密集型 PDF
+ *    - 稳定可靠
  * 
  * 优化：
- * - 批量处理：同一 PDF 的多页在一个 Worker 内完成，避免重复初始化
- * - 渲染与上传流水线：渲染完一页立即启动上传，CPU 与 I/O 并行
+ * - 批量处理：同一 PDF 的多页在一个 Worker 内完成
+ * - 渲染与上传流水线：CPU 渲染与网络 I/O 并行
  * - 1280px 黄金宽度：自适应缩放，兼顾清晰度与性能
- * - 混合渲染：小文件用 native-renderer，大文件用 pdfjs 分片加载
- * 
- * 依赖：
- * - RangeLoader: 分片加载（src/loaders/range-loader.js）
- * - COS Uploader: COS 上传（src/services/cos-uploader.js）
- * - sharp: 高性能图像处理（基于 libvips）
- * - native-renderer: Rust + PDFium 高性能渲染（可选）
  */
 
 import { getDocument, OPS } from "pdfjs-dist/legacy/build/pdf.mjs";
@@ -38,42 +36,32 @@ const __dirname = path.dirname(__filename);
 // Worker 日志
 const logger = createLogger('Worker');
 
-// ==================== Native Renderer 配置 ====================
-
-// Native renderer 文件大小阈值（字节）- 小于此值使用 native-renderer
-const NATIVE_RENDERER_THRESHOLD = parseInt(process.env.NATIVE_RENDERER_THRESHOLD) || 3 * 1024 * 1024; // 3MB
-
-// 是否启用 native renderer
-const NATIVE_RENDERER_ENABLED = process.env.NATIVE_RENDERER_ENABLED !== 'false';
-
 // ==================== Native Renderer 动态导入 ====================
 
 let nativeRenderer = null;
 let nativeAvailable = false;
 
-// 尝试加载 native-renderer（在 Worker 线程中）
-if (NATIVE_RENDERER_ENABLED) {
-    try {
-        const nativeRendererPath = path.join(__dirname, '../../native-renderer/index.js');
-        nativeRenderer = await import(nativeRendererPath);
+// 尝试加载 native-renderer
+try {
+    const nativeRendererPath = path.join(__dirname, '../../native-renderer/index.js');
+    nativeRenderer = await import(nativeRendererPath);
+    
+    if (nativeRenderer.isPdfiumAvailable()) {
+        nativeAvailable = true;
         
-        if (nativeRenderer.isPdfiumAvailable()) {
-            nativeAvailable = true;
-            
-            // 预热 PDFium：提前加载动态库并初始化，避免首次请求冷启动延迟
-            try {
-                const warmupTime = nativeRenderer.warmup();
-                logger.info(`Native renderer 已加载并预热: ${nativeRenderer.getVersion()}, 预热耗时: ${warmupTime}ms, 阈值: ${(NATIVE_RENDERER_THRESHOLD / 1024 / 1024).toFixed(1)}MB`);
-            } catch (warmupErr) {
-                logger.warn(`Native renderer 预热失败: ${warmupErr.message}，首次请求可能较慢`);
-                logger.info(`Native renderer 已加载: ${nativeRenderer.getVersion()}, 阈值: ${(NATIVE_RENDERER_THRESHOLD / 1024 / 1024).toFixed(1)}MB`);
-            }
-        } else {
-            logger.warn('Native renderer 加载成功，但 PDFium 库不可用，回退到 pdfjs');
+        // 预热 PDFium
+        try {
+            const warmupTime = nativeRenderer.warmup();
+            logger.info(`Native renderer 已加载并预热: ${nativeRenderer.getVersion()}, 耗时: ${warmupTime}ms`);
+        } catch (warmupErr) {
+            logger.warn(`Native renderer 预热失败: ${warmupErr.message}`);
+            logger.info(`Native renderer 已加载: ${nativeRenderer.getVersion()}`);
         }
-    } catch (e) {
-        logger.warn(`Native renderer 不可用: ${e.message}，回退到 pdfjs`);
+    } else {
+        logger.warn('Native renderer 加载成功，但 PDFium 库不可用');
     }
+} catch (e) {
+    logger.warn(`Native renderer 不可用: ${e.message}`);
 }
 
 // ==================== sharp 动态导入 ====================
@@ -81,11 +69,10 @@ if (NATIVE_RENDERER_ENABLED) {
 let sharp = null;
 let sharpAvailable = false;
 
-// 尝试加载 sharp（可选依赖）
 try {
     sharp = (await import('sharp')).default;
     sharpAvailable = true;
-    logger.info('sharp 库已加载，使用 libvips 高性能编码');
+    logger.info('sharp 库已加载');
 } catch (e) {
     logger.warn('sharp 库未安装，回退到 canvas.toBuffer 编码');
 }
@@ -94,101 +81,462 @@ try {
 
 const CMAP_URL = path.join(__dirname, '../../node_modules/pdfjs-dist/cmaps/');
 const STANDARD_FONT_DATA_URL = path.join(__dirname, '../../node_modules/pdfjs-dist/standard_fonts/');
-// wasm 文件路径（用于 openjpeg 和 qcms）
 const WASM_URL = 'file://' + path.join(__dirname, '../../node_modules/pdfjs-dist/wasm/');
 
 // ==================== 渲染配置 ====================
 
-// 黄金宽度：目标输出宽度（适合大多数屏幕和场景）
 const TARGET_RENDER_WIDTH = parseInt(process.env.TARGET_RENDER_WIDTH) || 1280;
-
-// 扫描件/纯图片页面的降级渲染宽度（减少解码和渲染开销）
 const IMAGE_HEAVY_TARGET_WIDTH = parseInt(process.env.IMAGE_HEAVY_TARGET_WIDTH) || 1024;
-
-// 最大缩放比例限制（防止小尺寸 PDF 过度放大）
 const MAX_RENDER_SCALE = parseFloat(process.env.MAX_RENDER_SCALE) || 4.0;
-
-// 超大页面安全网（像素数阈值）
-const XLARGE_PAGE_THRESHOLD = parseInt(process.env.XLARGE_PAGE_THRESHOLD) || 4000 * 4000; // 16MP
+const XLARGE_PAGE_THRESHOLD = parseInt(process.env.XLARGE_PAGE_THRESHOLD) || 4000 * 4000;
 const XLARGE_PAGE_SCALE = parseFloat(process.env.XLARGE_PAGE_SCALE) || 0.75;
-
-// WebP 编码质量（1-100）- 70 是体积/质量的最佳平衡点
 const WEBP_QUALITY = parseInt(process.env.WEBP_QUALITY) || 70;
-
-// WebP 透明通道质量（1-100）- PDF 渲染的 Alpha 通道主要用于抗锯齿，不需要高精度
 const WEBP_ALPHA_QUALITY = parseInt(process.env.WEBP_ALPHA_QUALITY) || 70;
-
-// WebP 编码努力程度（0-6，默认4）- 值越低编码越快，但压缩率略降
 const WEBP_EFFORT = parseInt(process.env.WEBP_EFFORT) || 2;
-
-// 主动 GC 配置
-const GC_THRESHOLD_MB = parseInt(process.env.GC_THRESHOLD_MB) || 500; // 堆内存超过此值时触发 GC
-
-// PDF.js Verbose 日志级别（0=errors, 1=warnings, 5=infos）
+const GC_THRESHOLD_MB = parseInt(process.env.GC_THRESHOLD_MB) || 500;
 const PDFJS_VERBOSITY = parseInt(process.env.PDFJS_VERBOSITY) || (IS_DEV ? 5 : 1);
+
+// ==================== Worker 主入口 ====================
+
+/**
+ * Worker 主入口：根据主线程的决策调度渲染器
+ * 
+ * @param {Object} params
+ * @param {Buffer} [params.pdfData] - PDF 文件数据（Native 路径）
+ * @param {string} [params.pdfUrl] - PDF 文件 URL（PDF.js 路径）
+ * @param {number[]} params.pageNums - 要渲染的页码数组
+ * @param {string} params.globalPadId - 全局 ID
+ * @param {boolean} params.uploadToCos - 是否上传到 COS
+ * @param {boolean} params.useNativeRenderer - 是否使用 Native Renderer
+ * @param {number} [params.pdfSize] - PDF 文件大小
+ * @param {number} [params.numPages] - PDF 页数
+ */
+export default async function processPages(params) {
+    const { useNativeRenderer, pdfData, pdfUrl } = params;
+    
+    // 主线程已经做出了决策
+    if (useNativeRenderer && nativeAvailable && pdfData) {
+        return await processWithNativeRenderer(params);
+    } else if (pdfUrl) {
+        return await processWithPdfjs(params);
+    } else {
+        throw new Error('无效的任务参数：需要 pdfData 或 pdfUrl');
+    }
+}
+
+// ==================== Native Renderer 路径 ====================
+
+/**
+ * 使用 Native Renderer (Rust + PDFium) 处理 PDF
+ * 
+ * 特点：
+ * - 直接使用 PDFium C++ 库渲染
+ * - 内置 WebP 编码
+ * - 单次调用完成所有页面渲染
+ * - 性能最优
+ */
+async function processWithNativeRenderer({
+    pdfData,
+    pageNums,
+    globalPadId,
+    uploadToCos: shouldUpload,
+    pdfSize,
+    numPages: providedNumPages,
+}) {
+    const startTime = Date.now();
+    
+    const metrics = {
+        infoTime: 0,
+        parseTime: 0,
+        renderTime: 0,
+        uploadTime: 0,
+        totalTime: 0,
+        pdfSize: pdfSize || pdfData.length,
+        rangeStats: null,
+        pageMetrics: [],
+        renderer: 'native',
+    };
+    
+    try {
+        // 转换为 Buffer（如果是 ArrayBuffer）
+        const pdfBuffer = Buffer.isBuffer(pdfData) ? pdfData : Buffer.from(pdfData);
+        metrics.pdfSize = pdfBuffer.length;
+        
+        logger.debug(`Native Renderer 模式: ${(metrics.pdfSize / 1024 / 1024).toFixed(2)}MB`);
+        
+        // 获取页数
+        const numPages = providedNumPages || nativeRenderer.getPageCount(pdfBuffer);
+        
+        // 如果没有指定页码，只返回页数信息
+        if (!pageNums || pageNums.length === 0) {
+            metrics.totalTime = Date.now() - startTime;
+            metrics.rangeStats = {
+                mode: 'native-renderer',
+                totalBytes: metrics.pdfSize,
+                totalBytesMB: (metrics.pdfSize / 1024 / 1024).toFixed(2),
+            };
+            
+            return {
+                success: true,
+                results: [],
+                metrics: { ...metrics, numPages, renderedCount: 0, uploadedCount: 0 },
+            };
+        }
+        
+        // 过滤无效页码
+        const validPageNums = pageNums.filter(p => p >= 1 && p <= numPages);
+        
+        // 渲染配置
+        const renderOptions = {
+            targetWidth: TARGET_RENDER_WIDTH,
+            imageHeavyWidth: IMAGE_HEAVY_TARGET_WIDTH,
+            maxScale: MAX_RENDER_SCALE,
+            webpQuality: WEBP_QUALITY,
+            detectScan: true,
+        };
+        
+        // 调用 native renderer 渲染
+        const renderStart = Date.now();
+        const nativeResult = nativeRenderer.renderPages(pdfBuffer, validPageNums, renderOptions);
+        metrics.renderTime = Date.now() - renderStart;
+        
+        if (!nativeResult.success) {
+            throw new Error(nativeResult.error || 'Native renderer 渲染失败');
+        }
+        
+        // 转换结果格式
+        let results = nativeResult.pages.map(page => {
+            metrics.pageMetrics.push({
+                pageNum: page.pageNum,
+                width: page.width,
+                height: page.height,
+                scale: 1.0,
+                timing: {
+                    render: page.renderTime,
+                    encode: page.encodeTime,
+                    total: page.renderTime + page.encodeTime,
+                },
+                success: page.success,
+            });
+            
+            return {
+                pageNum: page.pageNum,
+                width: page.width,
+                height: page.height,
+                buffer: page.success ? page.buffer : undefined,
+                success: page.success,
+                error: page.error,
+                timing: {
+                    render: page.renderTime,
+                    encode: page.encodeTime,
+                    total: page.renderTime + page.encodeTime,
+                },
+            };
+        });
+        
+        // 上传到 COS
+        if (shouldUpload && globalPadId) {
+            const cos = await getCosInstance();
+            if (cos) {
+                const filePrefix = `${COS_CONFIG.Path}/${globalPadId}`;
+                
+                const uploadPromises = results.map(async (page) => {
+                    if (!page.success || !page.buffer) return page;
+                    
+                    const key = `${filePrefix}_${page.pageNum}.webp`;
+                    const uploadStart = Date.now();
+                    
+                    try {
+                        await uploadFile(cos, page.buffer, key);
+                        const uploadTime = Date.now() - uploadStart;
+                        
+                        if (IS_DEV || IS_TEST) {
+                            logger.perf('COS上传成功(Native)', {
+                                page: page.pageNum,
+                                key,
+                                size: `${(page.buffer.length / 1024).toFixed(1)}KB`,
+                                time: uploadTime,
+                            });
+                        }
+                        
+                        return {
+                            pageNum: page.pageNum,
+                            width: page.width,
+                            height: page.height,
+                            cosKey: '/' + key,
+                            success: true,
+                            timing: { ...page.timing, upload: uploadTime },
+                        };
+                    } catch (error) {
+                        logger.error(`COS上传失败(Native): page=${page.pageNum}, error=${error.message}`);
+                        return { ...page, success: false, error: error.message };
+                    }
+                });
+                
+                results = await Promise.all(uploadPromises);
+            }
+        }
+        
+        metrics.totalTime = Date.now() - startTime;
+        metrics.rangeStats = {
+            mode: 'native-renderer',
+            totalBytes: metrics.pdfSize,
+            totalBytesMB: (metrics.pdfSize / 1024 / 1024).toFixed(2),
+            nativeRenderTime: nativeResult.totalTime,
+        };
+        
+        if (IS_DEV || IS_TEST) {
+            logger.perf('Native渲染完成', {
+                pdfSize: `${(metrics.pdfSize / 1024 / 1024).toFixed(2)}MB`,
+                numPages,
+                renderedPages: results.length,
+                renderer: 'native',
+                timing: { render: metrics.renderTime, total: metrics.totalTime },
+            });
+        }
+        
+        return {
+            success: true,
+            results,
+            metrics: {
+                ...metrics,
+                numPages,
+                renderedCount: results.filter(r => r.success || r.buffer).length,
+                uploadedCount: results.filter(r => r.success && r.cosKey).length,
+            },
+        };
+    } catch (error) {
+        logger.error(`Native renderer 处理失败: ${error.message}`);
+        return {
+            success: false,
+            error: `Native renderer 失败: ${error.message}`,
+            results: [],
+            metrics: { ...metrics, totalTime: Date.now() - startTime },
+        };
+    }
+}
+
+// ==================== PDF.js 路径 ====================
+
+/**
+ * 使用 PDF.js + RangeLoader 处理 PDF
+ * 
+ * 特点：
+ * - 分片加载，只下载需要的数据
+ * - 适合大文件
+ * - 稳定可靠
+ */
+async function processWithPdfjs({
+    pdfUrl,
+    pageNums,
+    globalPadId,
+    uploadToCos: shouldUpload,
+}) {
+    const startTime = Date.now();
+    let pdfDocument;
+    let rangeLoader;
+    
+    const metrics = {
+        infoTime: 0,
+        parseTime: 0,
+        renderTime: 0,
+        uploadTime: 0,
+        totalTime: 0,
+        pdfSize: 0,
+        rangeStats: null,
+        pageMetrics: [],
+        renderer: 'pdfjs',
+    };
+    
+    try {
+        if (!pdfUrl) {
+            throw new Error('必须提供 pdfUrl');
+        }
+        
+        // 获取 PDF 信息
+        const parseStart = Date.now();
+        const infoStart = Date.now();
+        const { pdfSize, initialData, fullData, isSmallFile } = await getPdfInfo(pdfUrl);
+        metrics.infoTime = Date.now() - infoStart;
+        metrics.pdfSize = pdfSize;
+        
+        // 根据文件大小选择加载策略
+        let loadingTask;
+        
+        if (isSmallFile && fullData) {
+            logger.debug(`小文件模式: ${(pdfSize / 1024 / 1024).toFixed(2)}MB，全量下载`);
+            
+            loadingTask = getDocument({
+                data: new Uint8Array(fullData),
+                cMapUrl: CMAP_URL,
+                cMapPacked: true,
+                standardFontDataUrl: STANDARD_FONT_DATA_URL,
+                wasmUrl: WASM_URL,
+                verbosity: PDFJS_VERBOSITY,
+            });
+            
+            metrics.rangeStats = {
+                requestCount: 1,
+                totalBytes: fullData.byteLength,
+                totalBytesMB: (fullData.byteLength / 1024 / 1024).toFixed(2),
+                avgRequestTime: metrics.infoTime,
+                mode: 'full-download',
+            };
+        } else {
+            logger.debug(`分片加载模式: ${(pdfSize / 1024 / 1024).toFixed(2)}MB`);
+            
+            rangeLoader = new RangeLoader(pdfSize, initialData, pdfUrl);
+            
+            loadingTask = getDocument({
+                range: rangeLoader,
+                cMapUrl: CMAP_URL,
+                cMapPacked: true,
+                standardFontDataUrl: STANDARD_FONT_DATA_URL,
+                wasmUrl: WASM_URL,
+                rangeChunkSize: RANGE_CONFIG.CHUNK_SIZE,
+                disableAutoFetch: true,
+                verbosity: PDFJS_VERBOSITY,
+            });
+        }
+        
+        pdfDocument = await loadingTask.promise;
+        metrics.parseTime = Date.now() - parseStart;
+        
+        const numPages = pdfDocument.numPages;
+        
+        // 如果没有指定页码，只返回页数信息
+        if (!pageNums || pageNums.length === 0) {
+            metrics.totalTime = Date.now() - startTime;
+            if (!metrics.rangeStats) {
+                metrics.rangeStats = rangeLoader?.getStats() || null;
+            }
+            
+            return {
+                success: true,
+                results: [],
+                metrics: { ...metrics, numPages, renderedCount: 0, uploadedCount: 0 },
+            };
+        }
+        
+        // 过滤无效页码
+        const validPageNums = pageNums.filter(p => p >= 1 && p <= numPages);
+        
+        // 预测性预取
+        if (validPageNums.length > 1) {
+            const pagesToPrefetch = validPageNums.slice(1, 6);
+            pagesToPrefetch.forEach(pageNum => {
+                pdfDocument.getPage(pageNum)
+                    .then(page => page.getOperatorList())
+                    .catch(() => {});
+            });
+        }
+
+        // 渲染与上传
+        const renderStart = Date.now();
+        let results;
+        
+        if (shouldUpload && globalPadId) {
+            results = await renderAndUploadPipeline(pdfDocument, validPageNums, globalPadId, metrics);
+        } else {
+            results = await renderOnly(pdfDocument, validPageNums, metrics);
+        }
+        
+        metrics.renderTime = Date.now() - renderStart;
+        metrics.totalTime = Date.now() - startTime;
+        if (!metrics.rangeStats) {
+            metrics.rangeStats = rangeLoader?.getStats() || null;
+        }
+        
+        if (IS_DEV || IS_TEST) {
+            logger.perf('渲染完成', {
+                pdfSize: `${(metrics.pdfSize / 1024 / 1024).toFixed(2)}MB`,
+                numPages,
+                renderedPages: results.length,
+                timing: {
+                    info: metrics.infoTime,
+                    parse: metrics.parseTime,
+                    render: metrics.renderTime,
+                    total: metrics.totalTime,
+                },
+                rangeStats: metrics.rangeStats,
+            });
+            
+            logger.debug('每页渲染详情', metrics.pageMetrics.map(p => ({
+                page: p.pageNum,
+                size: `${p.width}x${p.height} @${p.scale}x`,
+                success: p.success,
+                scan: p.content?.isLikelyScan ? '✓' : '-',
+                timing: `Total:${p.timing.total}ms (getPage:${p.timing.getPage}, heur:${p.timing.heuristic || 0}, ops:${p.timing.getOperatorList}, render:${p.timing.render}, getImage:${p.timing.getImageData || 0}, encode:${p.timing.encode})`,
+                content: p.content ? `Ops:${p.content.operatorCount} (Paths:${p.content.pathOps}, Text:${p.content.textOps}, Imgs:${p.content.imageOps}), Transparency:${p.content.transparency}` : 'N/A',
+            })));
+        }
+        
+        return {
+            success: true,
+            results,
+            metrics: {
+                ...metrics,
+                numPages,
+                renderedCount: results.filter(r => r.success || r.buffer).length,
+                uploadedCount: results.filter(r => r.success && r.cosKey).length,
+            },
+        };
+    } catch (error) {
+        logger.error(`处理失败: ${error.message}`);
+        return {
+            success: false,
+            error: error.message,
+            results: [],
+            metrics: {
+                ...metrics,
+                totalTime: Date.now() - startTime,
+                rangeStats: rangeLoader?.getStats(),
+            },
+        };
+    } finally {
+        if (pdfDocument) {
+            try { await pdfDocument.destroy(); } catch (e) { /* 忽略 */ }
+        }
+        
+        try {
+            const heapUsed = process.memoryUsage().heapUsed;
+            const heapUsedMB = heapUsed / 1024 / 1024;
+            
+            if (global.gc && heapUsedMB > GC_THRESHOLD_MB) {
+                global.gc();
+                const afterGcMB = process.memoryUsage().heapUsed / 1024 / 1024;
+                logger.debug(`主动 GC: ${heapUsedMB.toFixed(1)}MB -> ${afterGcMB.toFixed(1)}MB`);
+            }
+        } catch (e) { /* 忽略 GC 错误 */ }
+    }
+}
+
+// ==================== 渲染函数 ====================
 
 /**
  * 使用 sharp 将 RGBA 原始像素数据编码为 WebP
- * 
- * WebP 编码参数优化策略（"不可能三角"平衡）：
- * 
- * 1. 质量/体积核心参数：
- *    - quality: 70 - 从 80 降至 70，减小约 25-40% 体积，视觉差异极小
- *    - alphaQuality: 70 - 透明通道主要用于抗锯齿，不需要高精度
- * 
- * 2. 速度核心参数：
- *    - effort: 2 - 从默认 4 降至 2，编码速度提升约 50%
- * 
- * 3. 辅助优化参数：
- *    - smartSubsample: true - 高质量色度子采样，视觉无损但体积更小
- * 
- * @param {Uint8ClampedArray} data - RGBA 像素数据
- * @param {number} width - 图像宽度
- * @param {number} height - 图像高度
- * @returns {Promise<Buffer>} WebP 编码后的 buffer
  */
 async function encodeWithSharp(data, width, height) {
-    // sharp 需要 Buffer，不能直接使用 Uint8ClampedArray
     const buffer = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
     
     return sharp(buffer, {
         raw: {
             width: Math.round(width),
             height: Math.round(height),
-            channels: 4,  // RGBA
+            channels: 4,
         },
     })
     .webp({ 
-        // 1. 质量/体积核心参数
-        quality: WEBP_QUALITY,             // 默认 70，显著减小体积
-        alphaQuality: WEBP_ALPHA_QUALITY,  // 默认 70，优化透明通道
-        
-        // 2. 速度核心参数
-        effort: WEBP_EFFORT,               // 默认 2，高速编码
-        
-        // 3. 辅助优化参数
-        smartSubsample: true,              // 高质量色度子采样
+        quality: WEBP_QUALITY,
+        alphaQuality: WEBP_ALPHA_QUALITY,
+        effort: WEBP_EFFORT,
+        smartSubsample: true,
     })
     .toBuffer();
 }
 
 /**
- * [深度调试版] 渲染单个页面 - 包含微观性能计时与内容复杂度分析
- * 
- * 渲染策略：
- * 1. 快速启发式预判：检测扫描件/纯图片页面，提前降级渲染宽度
- * 2. 使用默认 1.5 倍缩放（扫描件使用降级宽度）
- * 3. 如果缩放后宽度超过 MAX_OUTPUT_WIDTH (2000px)，自动降低缩放比例
- * 4. 超大页面（像素数超阈值）额外降级
- * 
- * 新增诊断能力：
- * - 获取并分析操作符列表（Operator List）
- * - 统计路径、文本、图像操作数量
- * - 检测透明度使用
- * - 细粒度计时（getPage, heuristic, getOperatorList, render, getImageData, encode）
- * 
- * @private
- * @returns {Object} 包含渲染结果、详细耗时指标和内容统计
+ * 渲染单个页面
  */
 async function renderPage(pdfDocument, pageNum) {
     let page;
@@ -196,7 +544,7 @@ async function renderPage(pdfDocument, pageNum) {
     const pageStartTime = Date.now();
     const timing = {
         getPage: 0,
-        heuristic: 0,        // 新增：启发式预判耗时
+        heuristic: 0,
         getOperatorList: 0,
         render: 0,
         getImageData: 0,
@@ -209,23 +557,21 @@ async function renderPage(pdfDocument, pageNum) {
         textOps: 0,
         imageOps: 0,
         transparency: false,
-        isLikelyScan: false,  // 新增：是否被判定为扫描件
+        isLikelyScan: false,
     };
     
     try {
-        // 1. 获取页面
+        // 获取页面
         const getPageStart = Date.now();
         page = await pdfDocument.getPage(pageNum);
         timing.getPage = Date.now() - getPageStart;
         
-        // 2. ⭐ [核心优化] 快速启发式预判 - 在 getOperatorList 之前判断是否为扫描件
+        // 快速启发式预判
         const heuristicStart = Date.now();
         let targetWidth = TARGET_RENDER_WIDTH;
         let isLikelyScan = false;
         
         try {
-            // 访问页面的底层字典结构（不触发图像解码，速度极快）
-            // page._pageInfo 包含页面资源引用等信息
             const pageDict = page._pageInfo?.pageDict || page.pageDict;
             
             if (pageDict) {
@@ -234,10 +580,6 @@ async function renderPage(pdfDocument, pageNum) {
                     const xobjects = resources.get('XObject');
                     const fonts = resources.get('Font');
                     
-                    // 启发式规则：
-                    // - 有图像资源 (XObject) 
-                    // - 没有字体资源 (Font) 或字体很少
-                    // - 则很可能是扫描件/纯图片页面
                     const hasImages = xobjects && (
                         typeof xobjects.getKeys === 'function' 
                             ? xobjects.getKeys().length > 0 
@@ -256,7 +598,6 @@ async function renderPage(pdfDocument, pageNum) {
                 }
             }
         } catch (e) {
-            // 忽略底层 API 的潜在错误，回退到默认行为
             if (IS_DEV || IS_TEST) {
                 logger.debug(`Page ${pageNum} 启发式预判失败: ${e.message}`);
             }
@@ -265,84 +606,56 @@ async function renderPage(pdfDocument, pageNum) {
         timing.heuristic = Date.now() - heuristicStart;
         contentStats.isLikelyScan = isLikelyScan;
         
-        if (isLikelyScan && (IS_DEV || IS_TEST)) {
-            logger.debug(`Page ${pageNum}: 检测到扫描件/纯图片页面，降级渲染宽度: ${targetWidth}px`);
-        }
-        
-        // 3. 获取原始页面尺寸 (在 72 DPI 下)
+        // 计算缩放比例
         const originalViewport = page.getViewport({ scale: 1.0 });
         const originalWidth = originalViewport.width;
         
-        // 4. 计算缩放比例：使用决策后的 targetWidth
         let scale = targetWidth / originalWidth;
         scale = Math.min(scale, MAX_RENDER_SCALE);
         
         let viewport = page.getViewport({ scale });
         
-        // 5. 超大页面安全网（像素数超阈值时额外降级）
+        // 超大页面安全网
         if (viewport.width * viewport.height > XLARGE_PAGE_THRESHOLD) {
-            logger.warn(`Page ${pageNum} 尺寸异常 (${Math.round(viewport.width)}x${Math.round(viewport.height)})，强制应用安全降级缩放`);
+            logger.warn(`Page ${pageNum} 尺寸异常，强制降级`);
             viewport = page.getViewport({ scale: scale * XLARGE_PAGE_SCALE });
         }
         
         const width = Math.round(viewport.width);
         const height = Math.round(viewport.height);
         
-        // 6. 获取并分析操作符列表 (Operator List)
-        // 注意：即使是扫描件，这一步仍会触发图像解码，但因为目标 scale 已减小，
-        // 后续的渲染和编码开销会显著降低
+        // 获取操作符列表
         const getOperatorListStart = Date.now();
         const operatorList = await page.getOperatorList();
         timing.getOperatorList = Date.now() - getOperatorListStart;
         
-        // 对操作符进行统计分析
+        // 统计分析
         contentStats.operatorCount = operatorList.fnArray.length;
         
-        // PDF.js OPS 常量映射到操作类型
         const pathOps = new Set([
-            pdfjsLib.OPS.moveTo,
-            pdfjsLib.OPS.lineTo,
-            pdfjsLib.OPS.curveTo,
-            pdfjsLib.OPS.curveTo2,
-            pdfjsLib.OPS.curveTo3,
-            pdfjsLib.OPS.closePath,
-            pdfjsLib.OPS.rectangle,
-            pdfjsLib.OPS.fill,
-            pdfjsLib.OPS.eoFill,
-            pdfjsLib.OPS.stroke,
-            pdfjsLib.OPS.fillStroke,
-            pdfjsLib.OPS.eoFillStroke,
+            pdfjsLib.OPS.moveTo, pdfjsLib.OPS.lineTo, pdfjsLib.OPS.curveTo,
+            pdfjsLib.OPS.curveTo2, pdfjsLib.OPS.curveTo3, pdfjsLib.OPS.closePath,
+            pdfjsLib.OPS.rectangle, pdfjsLib.OPS.fill, pdfjsLib.OPS.eoFill,
+            pdfjsLib.OPS.stroke, pdfjsLib.OPS.fillStroke, pdfjsLib.OPS.eoFillStroke,
         ]);
         const textOps = new Set([
-            pdfjsLib.OPS.showText,
-            pdfjsLib.OPS.showSpacedText,
-            pdfjsLib.OPS.nextLineShowText,
-            pdfjsLib.OPS.nextLineSetSpacingShowText,
+            pdfjsLib.OPS.showText, pdfjsLib.OPS.showSpacedText,
+            pdfjsLib.OPS.nextLineShowText, pdfjsLib.OPS.nextLineSetSpacingShowText,
         ]);
         const imageOps = new Set([
-            pdfjsLib.OPS.paintImageXObject,
-            pdfjsLib.OPS.paintImageMaskXObject,
-            pdfjsLib.OPS.paintInlineImageXObject,
-            pdfjsLib.OPS.paintInlineImageXObjectGroup,
+            pdfjsLib.OPS.paintImageXObject, pdfjsLib.OPS.paintImageMaskXObject,
+            pdfjsLib.OPS.paintInlineImageXObject, pdfjsLib.OPS.paintInlineImageXObjectGroup,
         ]);
-        const transparencyOps = new Set([
-            pdfjsLib.OPS.setGState,
-            pdfjsLib.OPS.beginGroup,
-        ]);
+        const transparencyOps = new Set([pdfjsLib.OPS.setGState, pdfjsLib.OPS.beginGroup]);
         
         for (const op of operatorList.fnArray) {
-            if (pathOps.has(op)) {
-                contentStats.pathOps++;
-            } else if (textOps.has(op)) {
-                contentStats.textOps++;
-            } else if (imageOps.has(op)) {
-                contentStats.imageOps++;
-            } else if (transparencyOps.has(op)) {
-                contentStats.transparency = true;
-            }
+            if (pathOps.has(op)) contentStats.pathOps++;
+            else if (textOps.has(op)) contentStats.textOps++;
+            else if (imageOps.has(op)) contentStats.imageOps++;
+            else if (transparencyOps.has(op)) contentStats.transparency = true;
         }
         
-        // 7. 创建 canvas 并渲染（复用已获取的 operatorList）
+        // 渲染
         canvasAndContext = pdfDocument.canvasFactory.create(width, height);
         
         const renderContext = {
@@ -352,11 +665,10 @@ async function renderPage(pdfDocument, pageNum) {
         };
         
         const renderStart = Date.now();
-        const renderTask = page.render(renderContext);
-        await renderTask.promise;
+        await page.render(renderContext).promise;
         timing.render = Date.now() - renderStart;
         
-        // 8. 编码为 WebP
+        // 编码为 WebP
         const encodeStart = Date.now();
         let buffer;
         
@@ -392,10 +704,7 @@ async function renderPage(pdfDocument, pageNum) {
             contentStats,
         };
     } finally {
-        try {
-            if (page) page.cleanup();
-        } catch (e) { /* 忽略 */ }
-        
+        try { if (page) page.cleanup(); } catch (e) { /* 忽略 */ }
         try {
             if (canvasAndContext && pdfDocument) {
                 pdfDocument.canvasFactory.reset(canvasAndContext, 1, 1);
@@ -404,276 +713,8 @@ async function renderPage(pdfDocument, pageNum) {
     }
 }
 
-// ==================== Worker 主函数 ====================
-
 /**
- * Worker 主函数：加载 PDF、渲染页面、上传 COS
- * 
- * 混合渲染模式：
- * - 小文件 (<3MB): 使用 native-renderer (Rust + PDFium) 高性能渲染
- * - 大文件 (>=3MB): 使用 pdfjs + RangeLoader 分片加载渲染
- * 
- * 批量处理模式（pdfjs）：
- * - 一次 getDocument() 初始化，处理批次内所有页面
- * - 使用 RangeLoader 分片加载，只下载需要的数据
- * - 渲染与上传流水线：CPU 渲染与网络 I/O 并行
- * 
- * 渲染策略：
- * - 1280px 黄金宽度：自适应缩放
- * - 超大页面安全网：像素数超阈值时降级
- * 
- * @param {Object} params
- * @param {string} params.pdfUrl - PDF 文件 URL
- * @param {number[]} params.pageNums - 要渲染的页码数组（空数组则只获取页数）
- * @param {string} params.globalPadId - 全局 ID（用于 COS 路径）
- * @param {boolean} params.uploadToCos - 是否上传到 COS
- * @returns {Promise<Object>} 渲染结果
- */
-export default async function processPages({ 
-    pdfUrl,
-    pageNums, 
-    globalPadId,
-    uploadToCos: shouldUpload = false,
-}) {
-    const startTime = Date.now();
-    let pdfDocument;
-    let rangeLoader;
-    
-    const metrics = {
-        infoTime: 0,
-        parseTime: 0,
-        renderTime: 0,
-        uploadTime: 0,
-        totalTime: 0,
-        pdfSize: 0,
-        rangeStats: null,
-        pageMetrics: [],  // 每页详细耗时
-        renderer: 'pdfjs', // 标记使用的渲染器
-    };
-    
-    try {
-        if (!pdfUrl) {
-            throw new Error('必须提供 pdfUrl');
-        }
-        
-        // 1. 智能获取 PDF 文件（根据文件大小选择最优策略）
-        const parseStart = Date.now();
-        
-        const infoStart = Date.now();
-        const { pdfSize, initialData, fullData, isSmallFile } = await getPdfInfo(pdfUrl);
-        metrics.infoTime = Date.now() - infoStart;
-        metrics.pdfSize = pdfSize;
-        
-        // ==================== 混合渲染策略 ====================
-        // 小文件 + native renderer 可用 => 使用 native-renderer
-        const useNativeRenderer = nativeAvailable && 
-                                  pdfSize < NATIVE_RENDERER_THRESHOLD && 
-                                  isSmallFile && 
-                                  fullData;
-        
-        if (useNativeRenderer) {
-            // 使用 Native Renderer (Rust + PDFium) 渲染
-            return await processWithNativeRenderer({
-                pdfBuffer: Buffer.from(fullData),
-                pdfSize,
-                pageNums,
-                globalPadId,
-                shouldUpload,
-                startTime,
-                metrics,
-            });
-        }
-        
-        // ==================== 原有 pdfjs 渲染逻辑 ====================
-        // 2. 根据文件大小选择加载策略
-        let loadingTask;
-        
-        if (isSmallFile) {
-            // 小文件优化：使用已下载的完整数据
-            logger.debug(`小文件模式: ${(pdfSize / 1024 / 1024).toFixed(2)}MB，全量下载`);
-            
-            loadingTask = getDocument({
-                data: new Uint8Array(fullData),
-                cMapUrl: CMAP_URL,
-                cMapPacked: true,
-                standardFontDataUrl: STANDARD_FONT_DATA_URL,
-                wasmUrl: WASM_URL,
-                verbosity: PDFJS_VERBOSITY,  // 开启 PDF.js 内部日志
-            });
-            
-            // 小文件模式下的统计信息
-            metrics.rangeStats = {
-                requestCount: 1,  // HEAD 不计入（无数据传输），只计全量下载
-                totalBytes: fullData.byteLength,
-                totalBytesMB: (fullData.byteLength / 1024 / 1024).toFixed(2),
-                avgRequestTime: metrics.infoTime,
-                mode: 'full-download',
-            };
-        } else {
-            // 大文件：使用 RangeLoader 分片加载
-            logger.debug(`分片加载模式: ${(pdfSize / 1024 / 1024).toFixed(2)}MB`);
-            
-            rangeLoader = new RangeLoader(pdfSize, initialData, pdfUrl);
-            
-            loadingTask = getDocument({
-                range: rangeLoader,
-                cMapUrl: CMAP_URL,
-                cMapPacked: true,
-                standardFontDataUrl: STANDARD_FONT_DATA_URL,
-                wasmUrl: WASM_URL,
-                rangeChunkSize: RANGE_CONFIG.CHUNK_SIZE,
-                disableAutoFetch: true,
-                verbosity: PDFJS_VERBOSITY,  // 开启 PDF.js 内部日志
-            });
-        }
-        
-        pdfDocument = await loadingTask.promise;
-        
-        metrics.parseTime = Date.now() - parseStart;
-        
-        const numPages = pdfDocument.numPages;
-        
-        // 如果没有指定页码，只返回页数信息
-        if (!pageNums || pageNums.length === 0) {
-            metrics.totalTime = Date.now() - startTime;
-            // 小文件模式下 rangeStats 已在上面设置，大文件模式从 rangeLoader 获取
-            if (!metrics.rangeStats) {
-                metrics.rangeStats = rangeLoader?.getStats() || null;
-            }
-            
-            return {
-                success: true,
-                results: [],
-                metrics: {
-                    ...metrics,
-                    numPages,
-                    renderedCount: 0,
-                    uploadedCount: 0,
-                },
-            };
-        }
-        
-        // 过滤无效页码
-        const validPageNums = pageNums.filter(p => p >= 1 && p <= numPages);
-        
-        // 预测性预取（仅对多页渲染有效）
-        if (validPageNums.length > 1) {
-            const pagesToPrefetch = validPageNums.slice(1, 6);
-            pagesToPrefetch.forEach(pageNum => {
-                pdfDocument.getPage(pageNum)
-                    .then(page => page.getOperatorList())
-                    .catch(() => {});
-            });
-        }
-
-        // 3. 渲染与上传流水线
-        const renderStart = Date.now();
-        let results;
-        
-        if (shouldUpload && globalPadId) {
-            results = await renderAndUploadPipeline(pdfDocument, validPageNums, globalPadId, metrics);
-        } else {
-            results = await renderOnly(pdfDocument, validPageNums, metrics);
-        }
-        
-        metrics.renderTime = Date.now() - renderStart;
-        metrics.totalTime = Date.now() - startTime;
-        // 小文件模式下 rangeStats 已在上面设置，大文件模式从 rangeLoader 获取
-        if (!metrics.rangeStats) {
-            metrics.rangeStats = rangeLoader?.getStats() || null;
-        }
-        
-        // 开发/测试环境：输出详细日志
-        if (IS_DEV || IS_TEST) {
-            logger.perf('渲染完成', {
-                pdfSize: `${(metrics.pdfSize / 1024 / 1024).toFixed(2)}MB`,
-                numPages,
-                renderedPages: results.length,
-                dataSource: metrics.dataSource,
-                timing: {
-                    info: metrics.infoTime,
-                    parse: metrics.parseTime,
-                    render: metrics.renderTime,
-                    total: metrics.totalTime,
-                },
-                rangeStats: metrics.rangeStats,
-            });
-            
-            // 开发/测试环境额外输出每页详情（深度调试格式）
-            if (IS_DEV || IS_TEST) {
-                logger.debug('每页渲染详情', metrics.pageMetrics.map(p => ({
-                    page: p.pageNum,
-                    size: `${p.width}x${p.height} @${p.scale}x`,
-                    success: p.success,
-                    // 是否被检测为扫描件
-                    scan: p.content?.isLikelyScan ? '✓' : '-',
-                    // 毫秒级计时细分（新增 heuristic）
-                    timing: `Total:${p.timing.total}ms (getPage:${p.timing.getPage}, heur:${p.timing.heuristic || 0}, ops:${p.timing.getOperatorList}, render:${p.timing.render}, getImage:${p.timing.getImageData || 0}, encode:${p.timing.encode})`,
-                    // 内容复杂度分析
-                    content: p.content ? `Ops:${p.content.operatorCount} (Paths:${p.content.pathOps}, Text:${p.content.textOps}, Imgs:${p.content.imageOps}), Transparency:${p.content.transparency}` : 'N/A',
-                })));
-            }
-        }
-        
-        return {
-            success: true,
-            results,
-            metrics: {
-                ...metrics,
-                numPages,
-                renderedCount: results.filter(r => r.success || r.buffer).length,
-                uploadedCount: results.filter(r => r.success && r.cosKey).length,
-            },
-        };
-    } catch (error) {
-        logger.error(`处理失败: ${error.message}`);
-        return {
-            success: false,
-            error: error.message,
-            results: [],
-            metrics: {
-                ...metrics,
-                totalTime: Date.now() - startTime,
-                rangeStats: rangeLoader?.getStats(),
-            },
-        };
-    } finally {
-        if (pdfDocument) {
-            try {
-                await pdfDocument.destroy();
-            } catch (e) { /* 忽略 */ }
-        }
-        
-        try {
-            const heapUsed = process.memoryUsage().heapUsed;
-            const heapUsedMB = heapUsed / 1024 / 1024;
-            
-            if (global.gc && heapUsedMB > GC_THRESHOLD_MB) {
-                global.gc();
-                const afterGcMB = process.memoryUsage().heapUsed / 1024 / 1024;
-                logger.debug(`主动 GC: ${heapUsedMB.toFixed(1)}MB -> ${afterGcMB.toFixed(1)}MB`);
-            }
-        } catch (e) { /* 忽略 GC 错误 */ }
-    }
-}
-
-/**
- * 渲染与上传流水线（最终优化版：Worker 内部并行）
- * 
- * 双重并行架构：
- * 1. 宏观并行 (Inter-Worker): 多个 Worker 同时处理不同页面批次
- * 2. 微观并行 (Intra-Worker): 每个 Worker 内部并行处理所有页面
- * 
- * 优势：
- * - 并行 renderPage 调用同时向 RangeLoader 发出多个数据请求
- * - 最大化 CPU 渲染与网络 I/O 的重叠
- * - 总耗时接近最慢单页时间，而非所有页面时间之和
- * 
- * @param {PDFDocumentProxy} pdfDocument - PDF 文档对象
- * @param {number[]} pageNums - 要渲染的页码
- * @param {string} globalPadId - 全局 ID
- * @param {Object} metrics - 指标收集对象
- * @returns {Promise<Array>} 渲染和上传结果
+ * 渲染与上传流水线
  */
 async function renderAndUploadPipeline(pdfDocument, pageNums, globalPadId, metrics) {
     const cos = await getCosInstance();
@@ -684,43 +725,36 @@ async function renderAndUploadPipeline(pdfDocument, pageNums, globalPadId, metri
     
     const filePrefix = `${COS_CONFIG.Path}/${globalPadId}`;
     
-    // ✨ 核心改动：将串行循环改为并行任务创建
     const pagePromises = pageNums.map(async (pageNum) => {
-        // a. 并行地开始渲染每一页
         const renderResult = await renderPage(pdfDocument, pageNum);
         
-        // b. 立即收集该页的所有详细指标
         metrics.pageMetrics.push({
             pageNum,
             width: renderResult.width,
             height: renderResult.height,
             scale: renderResult.scale,
             timing: renderResult.timing,
-            content: renderResult.contentStats,  // 新增：内容统计
+            content: renderResult.contentStats,
             success: renderResult.success,
         });
         
         if (renderResult.success) {
-            // c. 渲染成功后，立即开始上传（不阻塞其他页面的渲染）
             const key = `${filePrefix}_${pageNum}.webp`;
             const uploadStart = Date.now();
             
             try {
                 await uploadFile(cos, renderResult.buffer, key);
                 const uploadTime = Date.now() - uploadStart;
-                const bufferSize = renderResult.buffer.length;
                 
-                // 开发/测试环境：输出上传成功日志
                 if (IS_DEV || IS_TEST) {
                     logger.perf('COS上传成功', { 
                         page: pageNum, 
                         key, 
-                        size: `${(bufferSize / 1024).toFixed(1)}KB`, 
+                        size: `${(renderResult.buffer.length / 1024).toFixed(1)}KB`, 
                         time: uploadTime 
                     });
                 }
                 
-                // d. 返回上传成功的结果
                 return {
                     pageNum,
                     width: renderResult.width,
@@ -730,9 +764,7 @@ async function renderAndUploadPipeline(pdfDocument, pageNums, globalPadId, metri
                     timing: { ...renderResult.timing, upload: uploadTime },
                 };
             } catch (error) {
-                // 上传失败始终记录（所有环境）
                 logger.error(`COS上传失败: page=${pageNum}, key=${key}, error=${error.message}`);
-                // e. 返回上传失败的结果
                 return {
                     pageNum,
                     width: renderResult.width,
@@ -743,7 +775,6 @@ async function renderAndUploadPipeline(pdfDocument, pageNums, globalPadId, metri
                 };
             }
         } else {
-            // f. 渲染失败，直接返回结果
             return {
                 pageNum,
                 success: false,
@@ -753,33 +784,23 @@ async function renderAndUploadPipeline(pdfDocument, pageNums, globalPadId, metri
         }
     });
     
-    // ✨ 等待所有页面的"渲染->上传"流水线全部完成
     return await Promise.all(pagePromises);
 }
 
 /**
- * 仅渲染模式（最终优化版：Worker 内部并行）
- * 
- * 并行处理所有页面，总耗时接近最慢单页时间
- * 
- * @param {PDFDocumentProxy} pdfDocument - PDF 文档对象
- * @param {number[]} pageNums - 要渲染的页码
- * @param {Object} metrics - 指标收集对象
- * @returns {Promise<Array>} 渲染结果
+ * 仅渲染模式
  */
 async function renderOnly(pdfDocument, pageNums, metrics) {
-    // ✨ 核心改动：将串行循环改为并行任务创建
     const pagePromises = pageNums.map(async (pageNum) => {
         const result = await renderPage(pdfDocument, pageNum);
         
-        // 收集指标（包含内容统计）
         metrics.pageMetrics.push({
             pageNum,
             width: result.width,
             height: result.height,
             scale: result.scale,
             timing: result.timing,
-            content: result.contentStats,  // 新增：内容统计
+            content: result.contentStats,
             success: result.success,
         });
         
@@ -794,217 +815,5 @@ async function renderOnly(pdfDocument, pageNums, metrics) {
         };
     });
     
-    // ✨ 等待所有页面的渲染任务并行完成
     return await Promise.all(pagePromises);
-}
-
-// ==================== Native Renderer 处理函数 ====================
-
-/**
- * 使用 Native Renderer (Rust + PDFium) 处理 PDF
- * 
- * 适用于小文件 (<3MB)，性能更高：
- * - 直接使用 PDFium C++ 库渲染，无需 JavaScript 解析
- * - 内置 WebP 编码，无需额外调用 sharp
- * - 单次调用完成所有页面渲染
- * 
- * @param {Object} params
- * @param {Buffer} params.pdfBuffer - PDF 文件数据
- * @param {number} params.pdfSize - PDF 文件大小
- * @param {number[]} params.pageNums - 要渲染的页码数组
- * @param {string} params.globalPadId - 全局 ID（用于 COS 路径）
- * @param {boolean} params.shouldUpload - 是否上传到 COS
- * @param {number} params.startTime - 开始时间戳
- * @param {Object} params.metrics - 指标收集对象
- * @returns {Promise<Object>} 渲染结果
- */
-async function processWithNativeRenderer({
-    pdfBuffer,
-    pdfSize,
-    pageNums,
-    globalPadId,
-    shouldUpload,
-    startTime,
-    metrics,
-}) {
-    metrics.renderer = 'native';
-    
-    logger.debug(`Native Renderer 模式: ${(pdfSize / 1024 / 1024).toFixed(2)}MB`);
-    
-    try {
-        // 获取页数
-        const numPages = nativeRenderer.getPageCount(pdfBuffer);
-        
-        // 如果没有指定页码，只返回页数信息
-        if (!pageNums || pageNums.length === 0) {
-            metrics.totalTime = Date.now() - startTime;
-            metrics.rangeStats = {
-                mode: 'native-renderer',
-                totalBytes: pdfSize,
-                totalBytesMB: (pdfSize / 1024 / 1024).toFixed(2),
-            };
-            
-            return {
-                success: true,
-                results: [],
-                metrics: {
-                    ...metrics,
-                    numPages,
-                    renderedCount: 0,
-                    uploadedCount: 0,
-                },
-            };
-        }
-        
-        // 过滤无效页码
-        const validPageNums = pageNums.filter(p => p >= 1 && p <= numPages);
-        
-        // 渲染配置（与 pdfjs 保持一致）
-        const renderOptions = {
-            targetWidth: TARGET_RENDER_WIDTH,
-            imageHeavyWidth: IMAGE_HEAVY_TARGET_WIDTH,
-            maxScale: MAX_RENDER_SCALE,
-            webpQuality: WEBP_QUALITY,
-            detectScan: true,
-        };
-        
-        // 调用 native renderer 渲染
-        const renderStart = Date.now();
-        const nativeResult = nativeRenderer.renderPages(pdfBuffer, validPageNums, renderOptions);
-        metrics.renderTime = Date.now() - renderStart;
-        
-        if (!nativeResult.success) {
-            throw new Error(nativeResult.error || 'Native renderer 渲染失败');
-        }
-        
-        // 转换结果格式
-        let results = nativeResult.pages.map(page => {
-            // 收集每页指标
-            metrics.pageMetrics.push({
-                pageNum: page.pageNum,
-                width: page.width,
-                height: page.height,
-                scale: 1.0, // native renderer 内部处理缩放
-                timing: {
-                    render: page.renderTime,
-                    encode: page.encodeTime,
-                    total: page.renderTime + page.encodeTime,
-                },
-                success: page.success,
-            });
-            
-            return {
-                pageNum: page.pageNum,
-                width: page.width,
-                height: page.height,
-                buffer: page.success ? page.buffer : undefined,
-                success: page.success,
-                error: page.error,
-                timing: {
-                    render: page.renderTime,
-                    encode: page.encodeTime,
-                    total: page.renderTime + page.encodeTime,
-                },
-            };
-        });
-        
-        // 如果需要上传到 COS
-        if (shouldUpload && globalPadId) {
-            const cos = await getCosInstance();
-            if (cos) {
-                const filePrefix = `${COS_CONFIG.Path}/${globalPadId}`;
-                
-                // 并行上传
-                const uploadPromises = results.map(async (page) => {
-                    if (!page.success || !page.buffer) {
-                        return page;
-                    }
-                    
-                    const key = `${filePrefix}_${page.pageNum}.webp`;
-                    const uploadStart = Date.now();
-                    
-                    try {
-                        await uploadFile(cos, page.buffer, key);
-                        const uploadTime = Date.now() - uploadStart;
-                        
-                        if (IS_DEV || IS_TEST) {
-                            logger.perf('COS上传成功(Native)', {
-                                page: page.pageNum,
-                                key,
-                                size: `${(page.buffer.length / 1024).toFixed(1)}KB`,
-                                time: uploadTime,
-                            });
-                        }
-                        
-                        return {
-                            pageNum: page.pageNum,
-                            width: page.width,
-                            height: page.height,
-                            cosKey: '/' + key,
-                            success: true,
-                            timing: { ...page.timing, upload: uploadTime },
-                        };
-                    } catch (error) {
-                        logger.error(`COS上传失败(Native): page=${page.pageNum}, error=${error.message}`);
-                        return {
-                            ...page,
-                            success: false,
-                            error: error.message,
-                        };
-                    }
-                });
-                
-                results = await Promise.all(uploadPromises);
-            }
-        }
-        
-        metrics.totalTime = Date.now() - startTime;
-        metrics.rangeStats = {
-            mode: 'native-renderer',
-            totalBytes: pdfSize,
-            totalBytesMB: (pdfSize / 1024 / 1024).toFixed(2),
-            nativeRenderTime: nativeResult.totalTime,
-        };
-        
-        // 开发/测试环境：输出详细日志
-        if (IS_DEV || IS_TEST) {
-            logger.perf('Native渲染完成', {
-                pdfSize: `${(pdfSize / 1024 / 1024).toFixed(2)}MB`,
-                numPages,
-                renderedPages: results.length,
-                renderer: 'native',
-                timing: {
-                    info: metrics.infoTime,
-                    render: metrics.renderTime,
-                    total: metrics.totalTime,
-                },
-            });
-        }
-        
-        return {
-            success: true,
-            results,
-            metrics: {
-                ...metrics,
-                numPages,
-                renderedCount: results.filter(r => r.success || r.buffer).length,
-                uploadedCount: results.filter(r => r.success && r.cosKey).length,
-            },
-        };
-    } catch (error) {
-        logger.error(`Native renderer 处理失败: ${error.message}，回退到 pdfjs`);
-        
-        // 回退到 pdfjs 渲染（重新调用 processPages，但禁用 native renderer）
-        // 注意：这里不能直接回退，因为会造成循环调用
-        // 返回错误，让上层处理
-        return {
-            success: false,
-            error: `Native renderer 失败: ${error.message}`,
-            results: [],
-            metrics: {
-                ...metrics,
-                totalTime: Date.now() - startTime,
-            },
-        };
-    }
 }
