@@ -241,12 +241,16 @@ class Pdf2Img {
         this.requestTracker?.endPhase('download');
         
         // 确定目标页码
-        let targetPages = this.determineTargetPages(pages, numPages);
+        // 注意：如果 numPages=0（侦察失败），传递原始 pages 参数让 Worker 自己解析
+        let targetPages = numPages > 0 
+            ? this.determineTargetPages(pages, numPages)
+            : null;  // null 表示让 Worker 自己确定页码
         
         // 构建任务数据
         const taskData = {
             pdfData: pdfBuffer,
             pageNums: targetPages,
+            pagesParam: pages,  // 原始 pages 参数，供 Worker 在 numPages=0 时使用
             globalPadId: this.globalPadId,
             uploadToCos,
             pdfSize,

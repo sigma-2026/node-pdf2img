@@ -483,3 +483,6 @@ autocannon "http://localhost:3000/api/pdf2img" -m POST -H "Content-Type: applica
 https://kubernetes.woa.com/v4/projects/prj5vxpx/workloads/cls-5vzjheeo/ns-prj5vxpx-5273103-production/StatefulSetPlus/pdf2img
 
 报表： https://galileo.woa.com/service/client?module_name=weboffice.pdfloader&platform=STKE&moduleId=2084357&q=f816a6fe9b76be3ea1b8996b
+
+测试环境：
+https://kubernetes.woa.com/v4/projects/prjxd5hd/basic

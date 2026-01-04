@@ -104,12 +104,13 @@ const PDFJS_VERBOSITY = parseInt(process.env.PDFJS_VERBOSITY) || (IS_DEV ? 5 : 1
  * @param {Object} params
  * @param {Buffer} [params.pdfData] - PDF 文件数据（Native 路径）
  * @param {string} [params.pdfUrl] - PDF 文件 URL（PDF.js 路径）
- * @param {number[]} params.pageNums - 要渲染的页码数组
+ * @param {number[]|null} params.pageNums - 要渲染的页码数组，null 表示让 Worker 自己计算
+ * @param {string|number[]|null} [params.pagesParam] - 原始 pages 参数（当 pageNums 为 null 时使用）
  * @param {string} params.globalPadId - 全局 ID
  * @param {boolean} params.uploadToCos - 是否上传到 COS
  * @param {boolean} params.useNativeRenderer - 是否使用 Native Renderer
  * @param {number} [params.pdfSize] - PDF 文件大小
- * @param {number} [params.numPages] - PDF 页数
+ * @param {number} [params.numPages] - PDF 页数（0 表示侦察失败）
  */
 export default async function processPages(params) {
     const { useNativeRenderer, pdfData, pdfUrl } = params;
@@ -138,6 +139,7 @@ export default async function processPages(params) {
 async function processWithNativeRenderer({
     pdfData,
     pageNums,
+    pagesParam,  // 原始 pages 参数，当 pageNums 为 null 时使用
     globalPadId,
     uploadToCos: shouldUpload,
     pdfSize,
@@ -164,11 +166,31 @@ async function processWithNativeRenderer({
         
         logger.debug(`Native Renderer 模式: ${(metrics.pdfSize / 1024 / 1024).toFixed(2)}MB`);
         
-        // 获取页数
-        const numPages = providedNumPages || nativeRenderer.getPageCount(pdfBuffer);
+        // 获取页数（如果主线程侦察失败，这里会用 native renderer 获取）
+        let numPages = providedNumPages;
+        if (!numPages || numPages <= 0) {
+            numPages = nativeRenderer.getPageCount(pdfBuffer);
+            logger.debug(`Worker 获取页数: ${numPages}`);
+        }
         
-        // 如果没有指定页码，只返回页数信息
-        if (!pageNums || pageNums.length === 0) {
+        // 确定目标页码
+        // 如果 pageNums 为 null，说明主线程侦察失败，需要在这里根据 pagesParam 计算
+        let validPageNums;
+        if (pageNums === null || pageNums === undefined) {
+            // 主线程侦察失败，根据 pagesParam 和实际页数计算目标页码
+            if (pagesParam === 'all') {
+                validPageNums = Array.from({ length: numPages }, (_, i) => i + 1);
+            } else if (Array.isArray(pagesParam)) {
+                validPageNums = [...new Set(pagesParam)]
+                    .filter(p => p >= 1 && p <= numPages)
+                    .sort((a, b) => a - b);
+            } else {
+                // 默认前6页
+                validPageNums = Array.from({ length: Math.min(6, numPages) }, (_, i) => i + 1);
+            }
+            logger.debug(`Worker 计算目标页码: [${validPageNums.join(',')}] (共 ${numPages} 页)`);
+        } else if (pageNums.length === 0) {
+            // 明确传入空数组，只返回页数信息
             metrics.totalTime = Date.now() - startTime;
             metrics.rangeStats = {
                 mode: 'native-renderer',
@@ -181,10 +203,10 @@ async function processWithNativeRenderer({
                 results: [],
                 metrics: { ...metrics, numPages, renderedCount: 0, uploadedCount: 0 },
             };
+        } else {
+            // 正常情况：过滤无效页码
+            validPageNums = pageNums.filter(p => p >= 1 && p <= numPages);
         }
-        
-        // 过滤无效页码
-        const validPageNums = pageNums.filter(p => p >= 1 && p <= numPages);
         
         // 渲染配置
         const renderOptions = {
