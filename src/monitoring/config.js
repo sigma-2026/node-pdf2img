@@ -97,6 +97,15 @@ export const RENDER_CONFIG = {
   PARALLEL_PDF_MAX_MB: parseInt(process.env.PARALLEL_PDF_MAX_MB) || 10,
   PARALLEL_MIN_PAGES: parseInt(process.env.PARALLEL_MIN_PAGES) || 6,
   BATCH_PAGES_PER_WORKER: parseInt(process.env.BATCH_PAGES_PER_WORKER) || 6,
+  
+  // ==================== Native Renderer 配置 ====================
+  // Native renderer 文件大小阈值（字节）
+  // 小于此阈值的文件使用 native-renderer (Rust + PDFium)
+  // 大于此阈值的文件使用 pdfjs + 分片加载
+  NATIVE_RENDERER_THRESHOLD: parseInt(process.env.NATIVE_RENDERER_THRESHOLD) || 3 * 1024 * 1024, // 3MB
+  
+  // 是否启用 native renderer（可通过环境变量禁用）
+  NATIVE_RENDERER_ENABLED: process.env.NATIVE_RENDERER_ENABLED !== 'false',
 };
 
 // ==================== 并发控制配置 ====================
@@ -178,6 +187,7 @@ export function printConfig() {
   logger.debug('超时配置:', TIMEOUT_CONFIG);
   logger.debug('重试配置:', RETRY_CONFIG);
   logger.debug('渲染配置:', RENDER_CONFIG);
+  logger.debug('Native Renderer阈值:', `${RENDER_CONFIG.NATIVE_RENDERER_THRESHOLD / 1024 / 1024}MB`);
   logger.debug('并发配置:', CONCURRENCY_CONFIG);
   logger.debug('内存配置:', MEMORY_CONFIG);
   logger.debug('==================');

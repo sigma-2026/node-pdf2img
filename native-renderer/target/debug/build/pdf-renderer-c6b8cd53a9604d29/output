@@ -1,0 +1,16 @@
+cargo:rerun-if-env-changed=DEBUG_GENERATED_CODE
+cargo:rerun-if-env-changed=TYPE_DEF_TMP_PATH
+cargo:rerun-if-env-changed=CARGO_CFG_NAPI_RS_CLI_VERSION
+cargo::rerun-if-env-changed=NAPI_DEBUG_GENERATED_CODE
+cargo::rerun-if-env-changed=NAPI_TYPE_DEF_TMP_FOLDER
+cargo::rerun-if-env-changed=NAPI_FORCE_BUILD_PDF_RENDERER
+cargo:rustc-link-arg=-Wl,-z,nodelete
+cargo:warning=Downloading PDFium library...
+cargo:warning=Downloading from: https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F7606/pdfium-linux-x64.tgz
+cargo:warning=PDFium library installed at: /data/code/pdf2img/native-renderer/target/debug/build/pdf-renderer-c6b8cd53a9604d29/out/pdfium/lib/libpdfium.so
+cargo:warning=PDFium downloaded successfully!
+cargo:rustc-link-search=native=/data/code/pdf2img/native-renderer/target/debug/build/pdf-renderer-c6b8cd53a9604d29/out/pdfium/lib
+cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN
+cargo:rustc-env=PDFIUM_DYNAMIC_LIB_PATH=/data/code/pdf2img/native-renderer/target/debug/build/pdf-renderer-c6b8cd53a9604d29/out/pdfium/lib
+cargo:rerun-if-env-changed=PDFIUM_DYNAMIC_LIB_PATH
+cargo:rerun-if-changed=build.rs

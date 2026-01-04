@@ -6,6 +6,7 @@ import { fileURLToPath } from "url";
 import { IS_DEV } from "./src/core/pdf2img.js";
 import { registerTestLocalRoute } from './src/test-local-route.js';
 import { timeoutMiddleware, getTimeoutConfig } from './src/middleware/timeout-middleware.js';
+import { getWorkerPool } from './src/workers/adaptive-pool.js';
 
 // 获取当前模块路径
 const __filename = fileURLToPath(import.meta.url);
@@ -86,4 +87,11 @@ app.use((err, req, res, next) => {
 // Start server
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
+    
+    // 预热 Worker Pool：提前初始化线程池，消除首次请求的冷启动延迟
+    // Worker 线程会在此时创建并加载 native-renderer、sharp 等依赖
+    const warmupStart = Date.now();
+    const pool = getWorkerPool();
+    const poolStatus = pool.getStatus();
+    console.log(`Worker Pool 预热完成: ${Date.now() - warmupStart}ms, 线程范围: ${poolStatus.config.minThreads}-${poolStatus.config.maxThreads}`);
 });

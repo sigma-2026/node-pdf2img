@@ -1,6 +1,12 @@
 import { spawn, execSync } from 'child_process';
 import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import path from 'path';
 import os from 'os';
+
+// 获取当前模块路径
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 /**
  * 环境变量生成
@@ -73,21 +79,32 @@ console.log(`[run-pm2] 检测到 ${cpuCount} 个 CPU 核心`);
 // - 结合 retain 7 + 每天轮转 = 约保留 7 天日志
 const LOG_RETAIN_COUNT = 7;  // 保留最近7个轮转版本（配合每天轮转，约等于7天日志）
 
+// PM2 命令路径（使用 npx 确保在 Docker 中也能找到）
+const pm2Bin = 'npx pm2';
+const pm2RuntimeBin = 'npx pm2-runtime';
+
 const baseCommand = [
-  'pm2 delete all || true',
-  'pm2 set pm2-logrotate:max_size 200M',
-  `pm2 set pm2-logrotate:retain ${LOG_RETAIN_COUNT}`,     // 每个日志文件保留的轮转版本数
-  'pm2 set pm2-logrotate:compress true',
-  'pm2 set pm2-logrotate:workerInterval 120',
-  'pm2 set pm2-logrotate:dateFormat YYYY-MM-DD',
-  'pm2 set pm2-logrotate:rotateInterval 0 0 * * *',       // 每天凌晨轮转
-  'pm2 set pm2-logrotate:TZ Asia/Shanghai',
+  `${pm2Bin} delete all || true`,
+  `${pm2Bin} set pm2-logrotate:max_size 200M`,
+  `${pm2Bin} set pm2-logrotate:retain ${LOG_RETAIN_COUNT}`,     // 每个日志文件保留的轮转版本数
+  `${pm2Bin} set pm2-logrotate:compress true`,
+  `${pm2Bin} set pm2-logrotate:workerInterval 120`,
+  `${pm2Bin} set pm2-logrotate:dateFormat YYYY-MM-DD`,
+  `${pm2Bin} set pm2-logrotate:rotateInterval 0 0 * * *`,       // 每天凌晨轮转
+  `${pm2Bin} set pm2-logrotate:TZ Asia/Shanghai`,
 ].join(' && ');
 
 // 注入额外环境变量
 EnvBuilder.injectExtraEnv();
 // 获取环境变量字符串
 const extraEnvStr = EnvBuilder.getExtraEnvStr();
+
+// 设置 native-renderer 的动态库路径（libpdfium.so）
+const nativeRendererPath = path.join(__dirname, 'native-renderer');
+const ldLibraryPath = process.env.LD_LIBRARY_PATH 
+  ? `${nativeRendererPath}:${process.env.LD_LIBRARY_PATH}`
+  : nativeRendererPath;
+const ldLibraryPathEnv = `LD_LIBRARY_PATH=${ldLibraryPath}`;
 
 // PM2 Cluster 模式配置
 // 注意：使用 -i <instances> 参数时，PM2 会自动启用 cluster 模式
@@ -102,8 +119,9 @@ const errLog = `--error /usr/src/app/pm2/logs/pdf2img.log`;  // 错误输出日�
 // 组合稳定运行参数（cluster 模式）
 const stableStr = `${name} ${instances} ${memmory} ${cron} ${outLog} ${errLog}`;
 
-const localCommand = `${baseCommand} && ${extraEnvStr} pm2 start app.js ${stableStr}`;
-const dockerCommand = `${baseCommand} && ${extraEnvStr} pm2-runtime start app.js ${stableStr}`;
+// 注意：LD_LIBRARY_PATH 需要在命令前设置，确保 native-renderer 能找到 libpdfium.so
+const localCommand = `${baseCommand} && ${ldLibraryPathEnv} ${extraEnvStr} ${pm2Bin} start app.js ${stableStr}`;
+const dockerCommand = `${baseCommand} && ${ldLibraryPathEnv} ${extraEnvStr} ${pm2RuntimeBin} start app.js ${stableStr}`;
 
 const command = process.env.NODE_ENV ? localCommand : dockerCommand;
 console.log('[run-pm2] 启动模式: PM2 Cluster');

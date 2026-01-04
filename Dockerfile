@@ -23,5 +23,8 @@ WORKDIR /usr/src/app
 COPY --from=builder /usr/src/app/node_modules ./node_modules
 COPY . .
 
+# 设置 native-renderer 的动态库路径
+ENV LD_LIBRARY_PATH=/usr/src/app/native-renderer
+
 EXPOSE 3000
 CMD ["node", "entry.js"]

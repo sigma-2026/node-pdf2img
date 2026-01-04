@@ -3,20 +3,23 @@
  * 
  * 职责：
  * 1. 接收 PDF URL 和页码范围（批量处理）
- * 2. 使用 RangeLoader 按需分片加载 PDF 数据
- * 3. 一次 getDocument() 初始化，串行渲染批次内所有页面
- * 4. 使用 sharp (libvips) 高性能编码为 WebP
- * 5. 上传 COS（生产环境）或返回 buffer（开发环境）
+ * 2. 根据文件大小自动选择渲染引擎：
+ *    - 小文件 (<3MB): 使用 native-renderer (Rust + PDFium) 高性能渲染
+ *    - 大文件 (>=3MB): 使用 pdfjs + RangeLoader 分片加载渲染
+ * 3. 使用 sharp (libvips) 高性能编码为 WebP
+ * 4. 上传 COS（生产环境）或返回 buffer（开发环境）
  * 
  * 优化：
  * - 批量处理：同一 PDF 的多页在一个 Worker 内完成，避免重复初始化
  * - 渲染与上传流水线：渲染完一页立即启动上传，CPU 与 I/O 并行
- * - 1440px 黄金宽度：自适应缩放，兼顾清晰度与性能
+ * - 1280px 黄金宽度：自适应缩放，兼顾清晰度与性能
+ * - 混合渲染：小文件用 native-renderer，大文件用 pdfjs 分片加载
  * 
  * 依赖：
  * - RangeLoader: 分片加载（src/loaders/range-loader.js）
  * - COS Uploader: COS 上传（src/services/cos-uploader.js）
  * - sharp: 高性能图像处理（基于 libvips）
+ * - native-renderer: Rust + PDFium 高性能渲染（可选）
  */
 
 import { getDocument, OPS } from "pdfjs-dist/legacy/build/pdf.mjs";
@@ -34,6 +37,44 @@ const __dirname = path.dirname(__filename);
 
 // Worker 日志
 const logger = createLogger('Worker');
+
+// ==================== Native Renderer 配置 ====================
+
+// Native renderer 文件大小阈值（字节）- 小于此值使用 native-renderer
+const NATIVE_RENDERER_THRESHOLD = parseInt(process.env.NATIVE_RENDERER_THRESHOLD) || 3 * 1024 * 1024; // 3MB
+
+// 是否启用 native renderer
+const NATIVE_RENDERER_ENABLED = process.env.NATIVE_RENDERER_ENABLED !== 'false';
+
+// ==================== Native Renderer 动态导入 ====================
+
+let nativeRenderer = null;
+let nativeAvailable = false;
+
+// 尝试加载 native-renderer（在 Worker 线程中）
+if (NATIVE_RENDERER_ENABLED) {
+    try {
+        const nativeRendererPath = path.join(__dirname, '../../native-renderer/index.js');
+        nativeRenderer = await import(nativeRendererPath);
+        
+        if (nativeRenderer.isPdfiumAvailable()) {
+            nativeAvailable = true;
+            
+            // 预热 PDFium：提前加载动态库并初始化，避免首次请求冷启动延迟
+            try {
+                const warmupTime = nativeRenderer.warmup();
+                logger.info(`Native renderer 已加载并预热: ${nativeRenderer.getVersion()}, 预热耗时: ${warmupTime}ms, 阈值: ${(NATIVE_RENDERER_THRESHOLD / 1024 / 1024).toFixed(1)}MB`);
+            } catch (warmupErr) {
+                logger.warn(`Native renderer 预热失败: ${warmupErr.message}，首次请求可能较慢`);
+                logger.info(`Native renderer 已加载: ${nativeRenderer.getVersion()}, 阈值: ${(NATIVE_RENDERER_THRESHOLD / 1024 / 1024).toFixed(1)}MB`);
+            }
+        } else {
+            logger.warn('Native renderer 加载成功，但 PDFium 库不可用，回退到 pdfjs');
+        }
+    } catch (e) {
+        logger.warn(`Native renderer 不可用: ${e.message}，回退到 pdfjs`);
+    }
+}
 
 // ==================== sharp 动态导入 ====================
 
@@ -368,13 +409,17 @@ async function renderPage(pdfDocument, pageNum) {
 /**
  * Worker 主函数：加载 PDF、渲染页面、上传 COS
  * 
- * 批量处理模式：
+ * 混合渲染模式：
+ * - 小文件 (<3MB): 使用 native-renderer (Rust + PDFium) 高性能渲染
+ * - 大文件 (>=3MB): 使用 pdfjs + RangeLoader 分片加载渲染
+ * 
+ * 批量处理模式（pdfjs）：
  * - 一次 getDocument() 初始化，处理批次内所有页面
  * - 使用 RangeLoader 分片加载，只下载需要的数据
  * - 渲染与上传流水线：CPU 渲染与网络 I/O 并行
  * 
  * 渲染策略：
- * - 1440px 黄金宽度：自适应缩放
+ * - 1280px 黄金宽度：自适应缩放
  * - 超大页面安全网：像素数超阈值时降级
  * 
  * @param {Object} params
@@ -403,6 +448,7 @@ export default async function processPages({
         pdfSize: 0,
         rangeStats: null,
         pageMetrics: [],  // 每页详细耗时
+        renderer: 'pdfjs', // 标记使用的渲染器
     };
     
     try {
@@ -418,6 +464,27 @@ export default async function processPages({
         metrics.infoTime = Date.now() - infoStart;
         metrics.pdfSize = pdfSize;
         
+        // ==================== 混合渲染策略 ====================
+        // 小文件 + native renderer 可用 => 使用 native-renderer
+        const useNativeRenderer = nativeAvailable && 
+                                  pdfSize < NATIVE_RENDERER_THRESHOLD && 
+                                  isSmallFile && 
+                                  fullData;
+        
+        if (useNativeRenderer) {
+            // 使用 Native Renderer (Rust + PDFium) 渲染
+            return await processWithNativeRenderer({
+                pdfBuffer: Buffer.from(fullData),
+                pdfSize,
+                pageNums,
+                globalPadId,
+                shouldUpload,
+                startTime,
+                metrics,
+            });
+        }
+        
+        // ==================== 原有 pdfjs 渲染逻辑 ====================
         // 2. 根据文件大小选择加载策略
         let loadingTask;
         
@@ -729,4 +796,215 @@ async function renderOnly(pdfDocument, pageNums, metrics) {
     
     // ✨ 等待所有页面的渲染任务并行完成
     return await Promise.all(pagePromises);
+}
+
+// ==================== Native Renderer 处理函数 ====================
+
+/**
+ * 使用 Native Renderer (Rust + PDFium) 处理 PDF
+ * 
+ * 适用于小文件 (<3MB)，性能更高：
+ * - 直接使用 PDFium C++ 库渲染，无需 JavaScript 解析
+ * - 内置 WebP 编码，无需额外调用 sharp
+ * - 单次调用完成所有页面渲染
+ * 
+ * @param {Object} params
+ * @param {Buffer} params.pdfBuffer - PDF 文件数据
+ * @param {number} params.pdfSize - PDF 文件大小
+ * @param {number[]} params.pageNums - 要渲染的页码数组
+ * @param {string} params.globalPadId - 全局 ID（用于 COS 路径）
+ * @param {boolean} params.shouldUpload - 是否上传到 COS
+ * @param {number} params.startTime - 开始时间戳
+ * @param {Object} params.metrics - 指标收集对象
+ * @returns {Promise<Object>} 渲染结果
+ */
+async function processWithNativeRenderer({
+    pdfBuffer,
+    pdfSize,
+    pageNums,
+    globalPadId,
+    shouldUpload,
+    startTime,
+    metrics,
+}) {
+    metrics.renderer = 'native';
+    
+    logger.debug(`Native Renderer 模式: ${(pdfSize / 1024 / 1024).toFixed(2)}MB`);
+    
+    try {
+        // 获取页数
+        const numPages = nativeRenderer.getPageCount(pdfBuffer);
+        
+        // 如果没有指定页码，只返回页数信息
+        if (!pageNums || pageNums.length === 0) {
+            metrics.totalTime = Date.now() - startTime;
+            metrics.rangeStats = {
+                mode: 'native-renderer',
+                totalBytes: pdfSize,
+                totalBytesMB: (pdfSize / 1024 / 1024).toFixed(2),
+            };
+            
+            return {
+                success: true,
+                results: [],
+                metrics: {
+                    ...metrics,
+                    numPages,
+                    renderedCount: 0,
+                    uploadedCount: 0,
+                },
+            };
+        }
+        
+        // 过滤无效页码
+        const validPageNums = pageNums.filter(p => p >= 1 && p <= numPages);
+        
+        // 渲染配置（与 pdfjs 保持一致）
+        const renderOptions = {
+            targetWidth: TARGET_RENDER_WIDTH,
+            imageHeavyWidth: IMAGE_HEAVY_TARGET_WIDTH,
+            maxScale: MAX_RENDER_SCALE,
+            webpQuality: WEBP_QUALITY,
+            detectScan: true,
+        };
+        
+        // 调用 native renderer 渲染
+        const renderStart = Date.now();
+        const nativeResult = nativeRenderer.renderPages(pdfBuffer, validPageNums, renderOptions);
+        metrics.renderTime = Date.now() - renderStart;
+        
+        if (!nativeResult.success) {
+            throw new Error(nativeResult.error || 'Native renderer 渲染失败');
+        }
+        
+        // 转换结果格式
+        let results = nativeResult.pages.map(page => {
+            // 收集每页指标
+            metrics.pageMetrics.push({
+                pageNum: page.pageNum,
+                width: page.width,
+                height: page.height,
+                scale: 1.0, // native renderer 内部处理缩放
+                timing: {
+                    render: page.renderTime,
+                    encode: page.encodeTime,
+                    total: page.renderTime + page.encodeTime,
+                },
+                success: page.success,
+            });
+            
+            return {
+                pageNum: page.pageNum,
+                width: page.width,
+                height: page.height,
+                buffer: page.success ? page.buffer : undefined,
+                success: page.success,
+                error: page.error,
+                timing: {
+                    render: page.renderTime,
+                    encode: page.encodeTime,
+                    total: page.renderTime + page.encodeTime,
+                },
+            };
+        });
+        
+        // 如果需要上传到 COS
+        if (shouldUpload && globalPadId) {
+            const cos = await getCosInstance();
+            if (cos) {
+                const filePrefix = `${COS_CONFIG.Path}/${globalPadId}`;
+                
+                // 并行上传
+                const uploadPromises = results.map(async (page) => {
+                    if (!page.success || !page.buffer) {
+                        return page;
+                    }
+                    
+                    const key = `${filePrefix}_${page.pageNum}.webp`;
+                    const uploadStart = Date.now();
+                    
+                    try {
+                        await uploadFile(cos, page.buffer, key);
+                        const uploadTime = Date.now() - uploadStart;
+                        
+                        if (IS_DEV || IS_TEST) {
+                            logger.perf('COS上传成功(Native)', {
+                                page: page.pageNum,
+                                key,
+                                size: `${(page.buffer.length / 1024).toFixed(1)}KB`,
+                                time: uploadTime,
+                            });
+                        }
+                        
+                        return {
+                            pageNum: page.pageNum,
+                            width: page.width,
+                            height: page.height,
+                            cosKey: '/' + key,
+                            success: true,
+                            timing: { ...page.timing, upload: uploadTime },
+                        };
+                    } catch (error) {
+                        logger.error(`COS上传失败(Native): page=${page.pageNum}, error=${error.message}`);
+                        return {
+                            ...page,
+                            success: false,
+                            error: error.message,
+                        };
+                    }
+                });
+                
+                results = await Promise.all(uploadPromises);
+            }
+        }
+        
+        metrics.totalTime = Date.now() - startTime;
+        metrics.rangeStats = {
+            mode: 'native-renderer',
+            totalBytes: pdfSize,
+            totalBytesMB: (pdfSize / 1024 / 1024).toFixed(2),
+            nativeRenderTime: nativeResult.totalTime,
+        };
+        
+        // 开发/测试环境：输出详细日志
+        if (IS_DEV || IS_TEST) {
+            logger.perf('Native渲染完成', {
+                pdfSize: `${(pdfSize / 1024 / 1024).toFixed(2)}MB`,
+                numPages,
+                renderedPages: results.length,
+                renderer: 'native',
+                timing: {
+                    info: metrics.infoTime,
+                    render: metrics.renderTime,
+                    total: metrics.totalTime,
+                },
+            });
+        }
+        
+        return {
+            success: true,
+            results,
+            metrics: {
+                ...metrics,
+                numPages,
+                renderedCount: results.filter(r => r.success || r.buffer).length,
+                uploadedCount: results.filter(r => r.success && r.cosKey).length,
+            },
+        };
+    } catch (error) {
+        logger.error(`Native renderer 处理失败: ${error.message}，回退到 pdfjs`);
+        
+        // 回退到 pdfjs 渲染（重新调用 processPages，但禁用 native renderer）
+        // 注意：这里不能直接回退，因为会造成循环调用
+        // 返回错误，让上层处理
+        return {
+            success: false,
+            error: `Native renderer 失败: ${error.message}`,
+            results: [],
+            metrics: {
+                ...metrics,
+                totalTime: Date.now() - startTime,
+            },
+        };
+    }
 }

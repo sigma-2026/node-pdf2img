@@ -18,7 +18,8 @@
     "prod": "node entry.js",
     "benchmark": "node ./scripts/benchmark.js all",
     "benchmark:health": "node ./scripts/benchmark.js health",
-    "benchmark:pdf2img": "node ./scripts/benchmark.js pdf2img"
+    "benchmark:pdf2img": "node ./scripts/benchmark.js pdf2img",
+    "build:native": "cd native-renderer && pnpm install && pnpm build"
   },
   "license": "ISC",
   "dependencies": {
