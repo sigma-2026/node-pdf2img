@@ -82,7 +82,7 @@ router.get('/health', async (req, res) => {
 
 **运行命令**：
 ```bash
-npm run test:health-load
+pnpm run test:health-load
 ```
 
 ### 3. 文档文件
@@ -177,17 +177,17 @@ npm run test:health-load
 
 ```bash
 # 开发环境
-npm run dev
+pnpm run dev
 
 # 生产环境（PM2 Cluster）
-npm run prod
+pnpm run prod
 ```
 
 ### 测试健康检查
 
 ```bash
 # 运行测试脚本
-npm run test:health-load
+pnpm run test:health-load
 
 # 手动测试
 curl http://localhost:3000/api/health
@@ -202,7 +202,7 @@ export CPU_THRESHOLD=90
 export MEMORY_THRESHOLD=90
 export HEAP_THRESHOLD=85
 
-npm run prod
+pnpm run prod
 ```
 
 #### 方式2：修改代码
@@ -445,7 +445,7 @@ healthCheck:
 curl http://localhost:3000/api/health | jq .
 
 # 降低阈值测试
-CPU_THRESHOLD=50 npm run prod
+CPU_THRESHOLD=50 pnpm run prod
 ```
 
 ### 问题3：北极星未摘除

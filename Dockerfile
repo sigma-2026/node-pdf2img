@@ -8,8 +8,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/src/app
-COPY package.json .npmrc ./
-RUN npm install --omit=dev
+COPY package.json pnpm-lock.yaml .npmrc ./
+RUN npm install -g pnpm && pnpm install --frozen-lockfile --prod
 
 # 运行阶段：仅包含运行时依赖
 FROM node:20-slim
@@ -24,4 +24,4 @@ COPY --from=builder /usr/src/app/node_modules ./node_modules
 COPY . .
 
 EXPOSE 3000
-CMD ["npm", "run", "prod"]
+CMD ["node", "entry.js"]

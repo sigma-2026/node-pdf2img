@@ -168,7 +168,7 @@ HEAP_THRESHOLD=70
 
 ```bash
 # 启动服务
-npm run dev
+pnpm run dev
 
 # 在另一个终端运行测试
 node test/pdf2img-load-protection.test.mjs
@@ -192,7 +192,7 @@ curl -X POST http://localhost:3000/api/pdf2img \
 **方式1：降低阈值**
 ```bash
 # 设置低阈值启动服务
-CPU_THRESHOLD=50 HEAP_THRESHOLD=60 npm run dev
+CPU_THRESHOLD=50 HEAP_THRESHOLD=60 pnpm run dev
 
 # 发送请求（很可能触发 503）
 curl -X POST http://localhost:3000/api/pdf2img \
@@ -269,10 +269,10 @@ wrk -t4 -c20 -d30s --latency \
 curl http://localhost:3000/api/health
 
 # 2. 调整阈值
-CPU_THRESHOLD=90 MEMORY_THRESHOLD=90 npm run dev
+CPU_THRESHOLD=90 MEMORY_THRESHOLD=90 pnpm run dev
 
 # 3. 启用 PM2 集群模式
-npm run pm2
+pnpm run pm2
 
 # 4. 检查内存泄漏
 node --inspect app.js

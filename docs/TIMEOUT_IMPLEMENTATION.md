@@ -24,7 +24,7 @@
 #### [`test/timeout.test.mjs`](../test/timeout.test.mjs)
 - 超时功能测试脚本
 - 测试正常请求和超时请求
-- 运行命令：`npm run test:timeout`
+- 运行命令：`pnpm run test:timeout`
 
 ### 3. 文档文件
 
@@ -40,7 +40,7 @@
 ### 4. 配置文件
 
 #### [`package.json`](../package.json)
-- 添加测试脚本：`npm run test:timeout`
+- 添加测试脚本：`pnpm run test:timeout`
 
 ## 功能特性
 
@@ -77,10 +77,10 @@
 
 ```bash
 # 开发环境
-npm run dev
+pnpm run dev
 
 # 生产环境（PM2）
-npm run prod
+pnpm run prod
 ```
 
 启动时会显示超时配置信息。
@@ -89,7 +89,7 @@ npm run prod
 
 ```bash
 # 运行超时测试
-npm run test:timeout
+pnpm run test:timeout
 ```
 
 ### 修改超时时间
@@ -259,7 +259,7 @@ const DEFAULT_TIMEOUT = 60000;
 pm2 restart all
 
 # 或重新部署
-npm run prod
+pnpm run prod
 ```
 
 ## 相关文档

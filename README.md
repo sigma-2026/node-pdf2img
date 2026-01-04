@@ -13,13 +13,13 @@ pnpm i
 
 ### Without Docker
 ```bash
-npm start
+pnpm start
 ```
 
 ### Using PM2 for Monitoring
 ```bash
-npm install pm2 -g
-npm run pm2
+pnpm add -g pm2
+pnpm run pm2
 ```
 
 # 请求示例：
@@ -30,19 +30,19 @@ npm run pm2
 
 ## 自动打镜像脚本
 ```
-npm run docker:push
+pnpm run docker:push
 ```
 
 ## 镜像发布前需要确认的事情(TODO: 自动化脚本)
 
 1、✅集成测试全部通过
 ```
-npm run test:integration
+pnpm run test:integration
 
 2、✅本地生图验证
 ```
 rm -rf ./output
-npm run dev
+pnpm run dev
 curl 'http://localhost:3000/test-local'
 ls ./output
 ```
@@ -99,7 +99,7 @@ const DEFAULT_TIMEOUT = 60000;
 
 ```bash
 # 运行超时测试
-npm run test:timeout
+pnpm run test:timeout
 ```
 
 ## 高负载丢弃功能
@@ -184,7 +184,7 @@ export CPU_THRESHOLD=90
 export MEMORY_THRESHOLD=90
 export HEAP_THRESHOLD=85
 
-npm run prod
+pnpm run prod
 ```
 
 ### 双重保护机制
@@ -198,7 +198,7 @@ npm run prod
 
 ```bash
 # 测试健康检查端点
-npm run test:health-load
+pnpm run test:health-load
 
 # 测试 /pdf2img 接口负载保护
 node test/pdf2img-load-protection.test.mjs
@@ -313,7 +313,7 @@ export NODE_ENV=dev
 
 2. 启动服务：
 ```bash
-npm start
+pnpm start
 ```
 
 3. 访问测试接口：
@@ -334,20 +334,20 @@ curl http://localhost:3000/test-local
 
 ```bash
 # 运行API集成测试（推荐）
-npm test
+pnpm test
 
 # 运行单元测试
-npm run test:unit
+pnpm run test:unit
 
 # 运行集成测试
-npm run test:integration
+pnpm run test:integration
 ```
 
 ## 单元测试
 测试工具函数和独立模块：
 
 ```bash
-npm run test:unit
+pnpm run test:unit
 ```
 
 单元测试覆盖：
@@ -365,9 +365,9 @@ Tests:       12 passed, 12 total
 真实的API接口测试：
 
 ```bash
-npm test
+pnpm test
 # 或
-npm run test:integration
+pnpm run test:integration
 ```
 
 集成测试包括：
@@ -395,14 +395,14 @@ PDF2IMG API 集成测试
 ## 发布前检查清单
 ```bash
 # 1. 运行单元测试
-npm run test:unit
+pnpm run test:unit
 
 # 2. 运行集成测试
-npm test
+pnpm test
 
 # 3. 确保所有测试通过
 # 4. 构建并推送镜像
-npm run docker:push
+pnpm run docker:push
 ```
 
 ## mirrors.tencent.com

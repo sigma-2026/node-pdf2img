@@ -128,14 +128,14 @@ curl -X POST http://localhost:3000/api/pdf2img \
 
 ```bash
 # 运行超时功能测试
-npm run test:timeout
+pnpm run test:timeout
 ```
 
 ### 手动测试
 
 ```bash
 # 1. 启动服务
-npm run dev
+pnpm run dev
 
 # 2. 在另一个终端发送测试请求
 curl -X POST http://localhost:3000/api/pdf2img \
@@ -287,7 +287,7 @@ const instances = `-i ${cpuCount}`;  // 使用所有核心
 pm2 restart all
 
 # 或重新部署
-npm run prod
+pnpm run prod
 ```
 
 ### 问题3：健康检查也超时

@@ -44,7 +44,7 @@ export CPU_THRESHOLD=90
 export MEMORY_THRESHOLD=90
 export HEAP_THRESHOLD=85
 
-npm run prod
+pnpm run prod
 ```
 
 #### 方式2：修改代码
@@ -283,7 +283,7 @@ curl http://localhost:3000/api/health
 
 ```bash
 # 运行健康检查高负载测试
-npm run test:health-load
+pnpm run test:health-load
 ```
 
 ### 测试输出示例
@@ -341,13 +341,13 @@ CPU 指标:
 
 ```bash
 # 1. 启动服务
-npm run dev
+pnpm run dev
 
 # 2. 测试健康检查
 curl http://localhost:3000/api/health
 
 # 3. 模拟高负载（降低阈值）
-CPU_THRESHOLD=10 MEMORY_THRESHOLD=10 npm run dev
+CPU_THRESHOLD=10 MEMORY_THRESHOLD=10 pnpm run dev
 
 # 4. 再次测试（应返回 503）
 curl http://localhost:3000/api/health
@@ -451,7 +451,7 @@ if (response.status === 503) {
 curl http://localhost:3000/api/health | jq .
 
 # 降低阈值测试
-CPU_THRESHOLD=50 npm run prod
+CPU_THRESHOLD=50 pnpm run prod
 ```
 
 ### 问题3：北极星未摘除实例

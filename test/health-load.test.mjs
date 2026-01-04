@@ -168,12 +168,12 @@ function showUsage() {
   log('  HEAP_THRESHOLD - 堆内存阈值（默认: 80）');
   
   log('\n使用方法:', 'blue');
-  log('  npm run test:health-load', 'green');
+  log('  pnpm run test:health-load', 'green');
   log('  或', 'yellow');
   log('  node test/health-load.test.mjs', 'green');
   
   log('\n自定义测试:', 'blue');
-  log('  TEST_URL=http://your-server:3000 npm run test:health-load', 'green');
+  log('  TEST_URL=http://your-server:3000 pnpm run test:health-load', 'green');
 }
 
 /**

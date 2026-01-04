@@ -292,10 +292,10 @@ curl http://localhost:3000/api/health
 tail -f /tmp/pdf2img.log | grep "服务过载"
 
 # 3. 调整阈值（临时）
-CPU_THRESHOLD=90 MEMORY_THRESHOLD=90 npm run dev
+CPU_THRESHOLD=90 MEMORY_THRESHOLD=90 pnpm run dev
 
 # 4. 启用集群模式（长期）
-npm run pm2
+pnpm run pm2
 ```
 
 ---

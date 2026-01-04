@@ -2,9 +2,9 @@
  * 压测脚本 - 使用 autocannon 进行性能测试
  * 
  * 使用方法:
- *   npm run benchmark              # 运行所有压测
- *   npm run benchmark:health       # 只测试 health 接口
- *   npm run benchmark:pdf2img      # 只测试 pdf2img 接口
+ *   pnpm run benchmark              # 运行所有压测
+ *   pnpm run benchmark:health       # 只测试 health 接口
+ *   pnpm run benchmark:pdf2img      # 只测试 pdf2img 接口
  *
  * 环境变量:
  *   BASE_URL          - 目标服务器地址，默认 http://localhost:3000
@@ -14,7 +14,7 @@
  *   PDF_URL           - 用于测试的 PDF 文件 URL
  */
 // 自定义参数
-// DURATION=30 CONNECTIONS=4 npm run benchmark:pdf2img
+// DURATION=30 CONNECTIONS=4 pnpm run benchmark:pdf2img
 
 import autocannon from 'autocannon';
 import { writeFileSync, mkdirSync, existsSync } from 'fs';
