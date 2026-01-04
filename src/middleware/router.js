@@ -163,8 +163,15 @@ logger.info(`请求并发上限: ${MAX_CONCURRENT_REQUESTS}, 队列上限: ${REQ
 router.post('/pdf2img', async (req, res) => {
   // 生成请求 ID
   const requestId = `req-${++requestCounter}-${Date.now()}`;
+  const startTime = Date.now();
   const url = req.body.url;
   const globalPadId = req.body.globalPadId;
+
+  // 生产环境基础日志：请求收到
+  logger.prod(`[${requestId}] 请求开始`, { 
+    globalPadId, 
+    url: url ? url.substring(0, 80) + (url.length > 80 ? '...' : '') : null,
+  });
 
   // 创建请求追踪器
   const tracker = createRequestTracker(requestId, {
@@ -276,11 +283,19 @@ router.post('/pdf2img', async (req, res) => {
     const data = await exportImage.pdfToImage({ pdfPath: url, pages });
 
     const summary = tracker.finish(true);
+    const totalDuration = Date.now() - startTime;
     
-    // 开发/测试环境：输出请求成功日志
+    // 生产环境基础日志：请求成功
+    logger.prod(`[${requestId}] 请求成功`, {
+      globalPadId,
+      pages: data.length,
+      duration: `${totalDuration}ms`,
+    });
+    
+    // 开发/测试环境：输出详细性能数据
     if (IS_DEV || IS_TEST) {
       logger.perf(`[${requestId}] 请求完成`, {
-        totalDuration: summary.totalDuration,
+        totalDuration,
         pageCount: data.length,
         phases: summary.phases,
       });
@@ -295,9 +310,17 @@ router.post('/pdf2img', async (req, res) => {
   } catch (error) {
     // 队列满：明确 503 + Retry-After
     if (error?.code === 'QUEUE_FULL') {
+      const totalDuration = Date.now() - startTime;
       recordOverloadReject();
       tracker.event('queueFull', { semaphore: requestSemaphore.getStatus() });
       tracker.finish(false, error);
+
+      // 生产环境基础日志：队列满拒绝
+      logger.prod(`[${requestId}] 请求拒绝(队列满)`, {
+        globalPadId,
+        duration: `${totalDuration}ms`,
+        queue: requestSemaphore.getStatus().queue,
+      });
 
       return res.status(503).send({
         code: 503,
@@ -309,7 +332,16 @@ router.post('/pdf2img', async (req, res) => {
       });
     }
 
-    logger.error(`[${requestId}] 错误异常: ${error.message}`);
+    const totalDuration = Date.now() - startTime;
+    
+    // 生产环境基础日志：请求失败
+    logger.prod(`[${requestId}] 请求失败`, {
+      globalPadId,
+      duration: `${totalDuration}ms`,
+      error: error.message,
+    });
+
+    logger.error(`[${requestId}] 错误详情: ${error.message}`, error.stack?.substring(0, 500));
     tracker.event('error', { message: error.message, stack: error.stack?.substring(0, 500) });
     tracker.finish(false, error);
 

@@ -1,5 +1,5 @@
 import { spawn, execSync } from 'child_process';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import os from 'os';
@@ -123,7 +123,24 @@ const stableStr = `${name} ${instances} ${memmory} ${cron} ${outLog} ${errLog}`;
 const localCommand = `${baseCommand} && ${ldLibraryPathEnv} ${extraEnvStr} ${pm2Bin} start app.js ${stableStr}`;
 const dockerCommand = `${baseCommand} && ${ldLibraryPathEnv} ${extraEnvStr} ${pm2RuntimeBin} start app.js ${stableStr}`;
 
-const command = process.env.NODE_ENV ? localCommand : dockerCommand;
+// 检测是否在 Docker/容器环境中运行
+// 方法：检查 /.dockerenv 文件或 /proc/1/cgroup 包含 docker/kubepods
+function isRunningInDocker() {
+  try {
+    // 方法1：检查 /.dockerenv 文件
+    if (existsSync('/.dockerenv')) return true;
+    // 方法2：检查 cgroup（适用于 K8s）
+    const cgroup = readFileSync('/proc/1/cgroup', 'utf8');
+    if (cgroup.includes('docker') || cgroup.includes('kubepods')) return true;
+  } catch {
+    // 忽略错误
+  }
+  return false;
+}
+
+const isDocker = isRunningInDocker();
+const command = isDocker ? dockerCommand : localCommand;
+console.log(`[run-pm2] 运行环境: ${isDocker ? 'Docker/K8s' : '本地'}`);
 console.log('[run-pm2] 启动模式: PM2 Cluster');
 console.log('[run-pm2] exec command:', command);
 

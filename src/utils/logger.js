@@ -2,27 +2,28 @@
  * 统一日志模块
  * 
  * 环境策略：
- * - IS_DEV (本地开发)：输出所有日志 (debug/info/warn/error)
- * - IS_TEST (测试环境)：输出关键日志 (info/warn/error) + 性能数据
- * - 正式环境：为了性能，只输出 error 级别
+ * - IS_DEV (本地开发)：输出所有日志 (debug/info/warn/error/prod)
+ * - IS_TEST (测试环境)：输出关键日志 (info/warn/error/prod) + 性能数据
+ * - 正式环境：输出 prod/error 级别（基础请求信息 + 错误）
  * 
  * 日志级别：
  * - debug: 调试信息（仅开发环境）
- * - info: 关键流程信息（开发+测试环境）
+ * - info: 详细流程信息（开发+测试环境）
  * - perf: 性能数据（开发+测试环境，用于上报）
  * - warn: 警告信息（开发+测试环境）
+ * - prod: 生产环境基础信息（所有环境）- 请求收到/成功/失败/耗时
  * - error: 错误信息（所有环境）
  * 
  * 使用方式：
  * import { logger, createLogger } from '../utils/logger.js';
  * 
  * // 全局 logger
- * logger.info('服务启动');
- * logger.perf('COS上传', { page: 1, size: 123, time: 150 });
+ * logger.info('详细流程信息');
+ * logger.prod('请求完成', { duration: 1500, pages: 5, success: true });
  * 
  * // 带前缀的 logger
- * const log = createLogger('Worker');
- * log.info('渲染完成');
+ * const log = createLogger('Router');
+ * log.prod('请求开始', { globalPadId: 'xxx' });
  */
 
 // 环境判断
@@ -36,14 +37,15 @@ const LOG_LEVELS = {
     info: 1,
     perf: 1,  // perf 与 info 同级，但语义不同
     warn: 2,
-    error: 3,
+    prod: 3,  // 生产环境基础信息，所有环境都输出
+    error: 4,
 };
 
 // 根据环境确定最低日志级别
 function getMinLogLevel() {
     if (IS_DEV) return LOG_LEVELS.debug;   // 开发环境：输出所有
     if (IS_TEST) return LOG_LEVELS.debug;  // 测试环境：也输出 debug
-    return LOG_LEVELS.error;               // 正式环境：只输出 error
+    return LOG_LEVELS.prod;                // 正式环境：输出 prod + error
 }
 
 const MIN_LOG_LEVEL = getMinLogLevel();
@@ -93,6 +95,7 @@ function logOutput(level, prefix, message, data) {
             break;
         case 'info':
         case 'perf':
+        case 'prod':
             console.log(logLine);
             break;
         case 'warn':
@@ -141,6 +144,17 @@ function createLogger(prefix = '') {
          */
         warn(message, data) {
             logOutput('warn', prefix, message, data);
+        },
+        
+        /**
+         * 生产环境基础日志（所有环境）
+         * 用于记录请求收到、成功/失败、耗时等必要信息
+         * 
+         * @param {string} message - 日志消息
+         * @param {Object} data - 附加数据
+         */
+        prod(message, data) {
+            logOutput('prod', prefix, message, data);
         },
         
         /**
