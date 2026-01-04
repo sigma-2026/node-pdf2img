@@ -485,4 +485,4 @@ https://kubernetes.woa.com/v4/projects/prj5vxpx/workloads/cls-5vzjheeo/ns-prj5vx
 报表： https://galileo.woa.com/service/client?module_name=weboffice.pdfloader&platform=STKE&moduleId=2084357&q=f816a6fe9b76be3ea1b8996b
 
 测试环境：
-https://kubernetes.woa.com/v4/projects/prjxd5hd/basic
+https://kubernetes.woa.com/v4/projects/prjxd5hd/workloads/cls-qzr0esc6/ns-prjxd5hd-5273095-dev-test/StatefulSetPlus/pdf2img

@@ -27,7 +27,7 @@
 
 // 环境判断
 const IS_DEV = process.env.NODE_ENV === 'dev';
-const IS_TEST = true || process.env.NODE_ENV === 'test';
+const IS_TEST = process.env.NODE_ENV === 'test';
 const IS_PROD = !IS_DEV && !IS_TEST;
 
 // 日志级别定义

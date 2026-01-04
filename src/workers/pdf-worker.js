@@ -1,5 +1,5 @@
 /**
- * PDF Worker - 终极架构 V5 执行中心
+ * PDF Worker - 终极架构 V7 执行中心
  * 
  * 职责：
  * 根据主线程的决策，执行两种渲染路径之一：
@@ -7,17 +7,18 @@
  * 1. Native 路径 (useNativeRenderer: true)
  *    - 接收 pdfData (Buffer)，直接调用 native-renderer
  *    - 适用于小文件和扫描件
- *    - 性能最优
+ *    - 性能最优，亚秒级响应
  * 
  * 2. PDF.js 路径 (useNativeRenderer: false)
  *    - 接收 pdfUrl，使用 RangeLoader 分片加载
  *    - 适用于大文件和文本密集型 PDF
- *    - 稳定可靠
+ *    - [V7优化] 串行渲染，并行上传，避免资源争抢
  * 
- * 优化：
- * - 批量处理：同一 PDF 的多页在一个 Worker 内完成
- * - 渲染与上传流水线：CPU 渲染与网络 I/O 并行
- * - 1280px 黄金宽度：自适应缩放，兼顾清晰度与性能
+ * V7 优化要点：
+ * - PDF.js 路径采用"串行渲染，并行上传"策略
+ * - 解决了 CPU/I/O 资源争抢导致的性能瓶颈
+ * - 每次只有一个页面进行 CPU 密集型操作（渲染+编码）
+ * - 上传任务立即启动但不阻塞，最后并行等待完成
  */
 
 import { getDocument, OPS } from "pdfjs-dist/legacy/build/pdf.mjs";
@@ -256,46 +257,68 @@ async function processWithNativeRenderer({
             };
         });
         
-        // 上传到 COS
+        // 上传到 COS（V7 优化：使用并发控制）
         if (shouldUpload && globalPadId) {
             const cos = await getCosInstance();
             if (cos) {
                 const filePrefix = `${COS_CONFIG.Path}/${globalPadId}`;
+                const UPLOAD_CONCURRENCY = 6; // 限制并发上传数
                 
-                const uploadPromises = results.map(async (page) => {
-                    if (!page.success || !page.buffer) return page;
-                    
-                    const key = `${filePrefix}_${page.pageNum}.webp`;
-                    const uploadStart = Date.now();
-                    
-                    try {
-                        await uploadFile(cos, page.buffer, key);
-                        const uploadTime = Date.now() - uploadStart;
+                // 创建上传任务
+                const uploadTasks = results
+                    .filter(page => page.success && page.buffer)
+                    .map((page) => async () => {
+                        const key = `${filePrefix}_${page.pageNum}.webp`;
+                        const uploadStart = Date.now();
                         
-                        if (IS_DEV || IS_TEST) {
-                            logger.perf('COS上传成功(Native)', {
-                                page: page.pageNum,
-                                key,
-                                size: `${(page.buffer.length / 1024).toFixed(1)}KB`,
-                                time: uploadTime,
-                            });
+                        try {
+                            await uploadFile(cos, page.buffer, key);
+                            const uploadTime = Date.now() - uploadStart;
+                            
+                            if (IS_DEV || IS_TEST) {
+                                logger.perf('COS上传成功(Native)', {
+                                    page: page.pageNum,
+                                    key,
+                                    size: `${(page.buffer.length / 1024).toFixed(1)}KB`,
+                                    time: uploadTime,
+                                });
+                            }
+                            
+                            return {
+                                pageNum: page.pageNum,
+                                width: page.width,
+                                height: page.height,
+                                cosKey: '/' + key,
+                                success: true,
+                                timing: { ...page.timing, upload: uploadTime },
+                            };
+                        } catch (error) {
+                            logger.error(`COS上传失败(Native): page=${page.pageNum}, error=${error.message}`);
+                            return { ...page, success: false, error: error.message };
                         }
-                        
-                        return {
-                            pageNum: page.pageNum,
-                            width: page.width,
-                            height: page.height,
-                            cosKey: '/' + key,
-                            success: true,
-                            timing: { ...page.timing, upload: uploadTime },
-                        };
-                    } catch (error) {
-                        logger.error(`COS上传失败(Native): page=${page.pageNum}, error=${error.message}`);
-                        return { ...page, success: false, error: error.message };
-                    }
-                });
+                    });
                 
-                results = await Promise.all(uploadPromises);
+                // 并发控制上传
+                const uploadedResults = [];
+                const executing = new Set();
+                
+                for (const task of uploadTasks) {
+                    const promise = task();
+                    uploadedResults.push(promise);
+                    executing.add(promise);
+                    promise.finally(() => executing.delete(promise));
+                    
+                    if (executing.size >= UPLOAD_CONCURRENCY) {
+                        await Promise.race(executing);
+                    }
+                }
+                
+                // 等待所有上传完成
+                const uploaded = await Promise.all(uploadedResults);
+                
+                // 合并失败的渲染结果和上传结果
+                const failedResults = results.filter(page => !page.success || !page.buffer);
+                results = [...failedResults, ...uploaded].sort((a, b) => a.pageNum - b.pageNum);
             }
         }
         
@@ -443,7 +466,7 @@ async function processWithPdfjs({
         // 过滤无效页码
         const validPageNums = pageNums.filter(p => p >= 1 && p <= numPages);
         
-        // 预测性预取
+        // 预测性预取（保留，但不会造成争抢，因为渲染是串行的）
         if (validPageNums.length > 1) {
             const pagesToPrefetch = validPageNums.slice(1, 6);
             pagesToPrefetch.forEach(pageNum => {
@@ -453,16 +476,15 @@ async function processWithPdfjs({
             });
         }
 
-        // 渲染与上传
+        // ⭐ [V7优化] 使用串行渲染流水线，解决资源争抢问题
         const renderStart = Date.now();
-        let results;
-        
-        if (shouldUpload && globalPadId) {
-            results = await renderAndUploadPipeline(pdfDocument, validPageNums, globalPadId, metrics);
-        } else {
-            results = await renderOnly(pdfDocument, validPageNums, metrics);
-        }
-        
+        const results = await pdfjsSerialRenderPipeline(
+            pdfDocument, 
+            validPageNums, 
+            globalPadId, 
+            metrics, 
+            shouldUpload
+        );
         metrics.renderTime = Date.now() - renderStart;
         metrics.totalTime = Date.now() - startTime;
         if (!metrics.rangeStats) {
@@ -736,8 +758,11 @@ async function renderPage(pdfDocument, pageNum) {
 }
 
 /**
- * 渲染与上传流水线
+ * 渲染与上传流水线（并行版本）
+ * @deprecated V7 后 PDF.js 路径已改用 pdfjsSerialRenderPipeline，此函数保留供参考
+ * @private
  */
+// eslint-disable-next-line no-unused-vars
 async function renderAndUploadPipeline(pdfDocument, pageNums, globalPadId, metrics) {
     const cos = await getCosInstance();
     if (!cos) {
@@ -810,7 +835,115 @@ async function renderAndUploadPipeline(pdfDocument, pageNums, globalPadId, metri
 }
 
 /**
- * 仅渲染模式
+ * [V7优化] PDF.js 专用流水线：串行渲染，并行上传
+ *
+ * 该策略通过 for...of 循环确保一次只处理一个页面的 CPU 密集型任务（渲染+编码），
+ * 避免了资源争抢。上传任务被立即发起并推入数组，最后通过
+ * Promise.all 实现并行上传，保证了 I/O 效率。
+ * 
+ * 解决的问题：
+ * - CPU/I/O 资源争抢：并行渲染导致 pdf.js 渲染、sharp 编码、RangeLoader 网络I/O 互相踩踏
+ * - I/O 等待链：网络请求耗时被直接加到渲染管线中
+ */
+async function pdfjsSerialRenderPipeline(pdfDocument, pageNums, globalPadId, metrics, shouldUpload) {
+    const cos = shouldUpload ? await getCosInstance() : null;
+    const uploadPromises = [];
+    const finalResults = []; // 用于存放渲染结果或失败对象
+    const filePrefix = globalPadId ? `${COS_CONFIG.Path}/${globalPadId}` : null;
+
+    logger.debug(`[V7] 串行渲染流水线启动: ${pageNums.length} 页, 上传=${shouldUpload && !!cos}`);
+
+    // ⭐ 使用 for...of 循环，保证页面渲染是【串行】的
+    for (const pageNum of pageNums) {
+        const renderResult = await renderPage(pdfDocument, pageNum);
+
+        // 立即收集该页的指标
+        metrics.pageMetrics.push({
+            pageNum: renderResult.pageNum,
+            width: renderResult.width,
+            height: renderResult.height,
+            scale: renderResult.scale,
+            timing: renderResult.timing,
+            content: renderResult.contentStats,
+            success: renderResult.success,
+        });
+
+        if (renderResult.success) {
+            // 如果不需要上传，将带 buffer 的结果加入 finalResults
+            if (!shouldUpload || !cos || !filePrefix) {
+                finalResults.push({
+                    pageNum: renderResult.pageNum,
+                    width: renderResult.width,
+                    height: renderResult.height,
+                    buffer: renderResult.buffer,
+                    success: true,
+                    timing: renderResult.timing,
+                });
+                continue;
+            }
+            
+            // ⭐ 渲染一页后，立即"启动"上传任务，但不 await 它
+            const key = `${filePrefix}_${pageNum}.webp`;
+            const bufferSize = renderResult.buffer.length;
+            const uploadStartTime = Date.now();
+            
+            const uploadPromise = uploadFile(cos, renderResult.buffer, key)
+                .then(() => {
+                    const uploadTime = Date.now() - uploadStartTime;
+                    if (IS_DEV || IS_TEST) {
+                        logger.perf('COS上传成功(V7串行)', {
+                            page: pageNum,
+                            key,
+                            size: `${(bufferSize / 1024).toFixed(1)}KB`,
+                            time: uploadTime,
+                        });
+                    }
+                    // 返回成功上传的对象，不含 buffer
+                    return { 
+                        pageNum: renderResult.pageNum,
+                        width: renderResult.width,
+                        height: renderResult.height,
+                        cosKey: '/' + key,
+                        success: true,
+                        timing: { ...renderResult.timing, upload: uploadTime },
+                    };
+                })
+                .catch(err => {
+                    logger.error(`COS上传失败(V7串行): page=${pageNum}, error=${err.message}`);
+                    // 返回上传失败的对象
+                    return { 
+                        pageNum: renderResult.pageNum,
+                        width: renderResult.width,
+                        height: renderResult.height,
+                        success: false, 
+                        error: `Upload failed: ${err.message}`,
+                        timing: renderResult.timing,
+                    };
+                });
+            uploadPromises.push(uploadPromise);
+        } else {
+            // 加入渲染失败的结果
+            finalResults.push({
+                pageNum: renderResult.pageNum,
+                success: false,
+                error: renderResult.error,
+                timing: renderResult.timing,
+            });
+        }
+    }
+    
+    // ⭐ 在所有页面都【渲染】完成后，再一次性等待所有【上传】任务完成
+    const uploadedResults = await Promise.all(uploadPromises);
+
+    logger.debug(`[V7] 串行渲染完成: 渲染失败/无需上传=${finalResults.length}, 上传完成=${uploadedResults.length}`);
+
+    // 合并所有结果并按页码排序返回
+    return [...finalResults, ...uploadedResults].sort((a, b) => a.pageNum - b.pageNum);
+}
+
+/**
+ * 仅渲染模式（并行版本）
+ * 注：保留此函数用于 renderAndUploadPipeline 的回退场景
  */
 async function renderOnly(pdfDocument, pageNums, metrics) {
     const pagePromises = pageNums.map(async (pageNum) => {
