@@ -10,23 +10,25 @@ const logger = createLogger('Config');
 
 // ==================== 分片加载配置 ====================
 // 分片大小（字节）- 根据文件大小动态调整
+// 分片下载速度很快，适当提高分片大小减少请求次数
 export const CHUNK_SIZE_CONFIG = {
   // 小文件（<5MB）使用较大分片
   SMALL_FILE_THRESHOLD: parseInt(process.env.SMALL_FILE_THRESHOLD) || 5 * 1024 * 1024,
-  SMALL_FILE_CHUNK_SIZE: parseInt(process.env.SMALL_FILE_CHUNK_SIZE) || 512 * 1024, // 512KB（小文件更细粒度，首片更快）
+  SMALL_FILE_CHUNK_SIZE: parseInt(process.env.SMALL_FILE_CHUNK_SIZE) || 1 * 1024 * 1024, // 1MB
   
-  // 中等文件（5-30MB）
-  MEDIUM_FILE_THRESHOLD: parseInt(process.env.MEDIUM_FILE_THRESHOLD) || 30 * 1024 * 1024,
-  MEDIUM_FILE_CHUNK_SIZE: parseInt(process.env.MEDIUM_FILE_CHUNK_SIZE) || 1 * 1024 * 1024, // 1MB
+  // 中等文件（5-50MB）
+  MEDIUM_FILE_THRESHOLD: parseInt(process.env.MEDIUM_FILE_THRESHOLD) || 50 * 1024 * 1024,
+  MEDIUM_FILE_CHUNK_SIZE: parseInt(process.env.MEDIUM_FILE_CHUNK_SIZE) || 2 * 1024 * 1024, // 2MB
   
-  // 大文件（>30MB）
-  LARGE_FILE_CHUNK_SIZE: parseInt(process.env.LARGE_FILE_CHUNK_SIZE) || 2 * 1024 * 1024, // 2MB（降低单片时延，避免超时）
+  // 大文件（>50MB）
+  LARGE_FILE_CHUNK_SIZE: parseInt(process.env.LARGE_FILE_CHUNK_SIZE) || 4 * 1024 * 1024, // 4MB
 };
 
 // 分片并发与请求控制
 export const RANGE_CONFIG = {
   // 最大并发 Range 请求数（避免 socket hang up / 过载）
-  MAX_CONCURRENCY: parseInt(process.env.RANGE_MAX_CONCURRENCY) || 4,
+  // 默认是 4，对于并行渲染的 Worker 来说太低了，提高到 8
+  MAX_CONCURRENCY: parseInt(process.env.RANGE_MAX_CONCURRENCY) || 8,
 };
 
 // 初始数据长度（首片，用于获取元数据+首页）
