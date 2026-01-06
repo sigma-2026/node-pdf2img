@@ -8,7 +8,11 @@ import { getAllPoolsStatus } from '../workers/adaptive-pool.js';
 import { createLogger, IS_DEV, IS_TEST } from '../utils/logger.js';
 
 const router = express.Router();
-const logger = createLogger('Router');
+const devLogger = createLogger('Router');  // 开发环境带前缀
+const prodLogger = createLogger();         // 生产环境无前缀
+
+// 根据环境选择 logger
+const logger = (IS_DEV || IS_TEST) ? devLogger : prodLogger;
 
 // 请求计数器（用于生成唯一请求 ID）
 let requestCounter = 0;
@@ -168,10 +172,7 @@ router.post('/pdf2img', async (req, res) => {
   const globalPadId = req.body.globalPadId;
 
   // 生产环境基础日志：请求收到
-  logger.prod(`[${requestId}] 请求开始`, { 
-    globalPadId, 
-    url: url ? url.substring(0, 80) + (url.length > 80 ? '...' : '') : null,
-  });
+  logger.prod(`请求开始`, { globalPadId });
 
   // 创建请求追踪器
   const tracker = createRequestTracker(requestId, {
@@ -286,7 +287,7 @@ router.post('/pdf2img', async (req, res) => {
     const totalDuration = Date.now() - startTime;
     
     // 生产环境基础日志：请求成功
-    logger.prod(`[${requestId}] 请求成功`, {
+    logger.prod(`请求成功`, {
       globalPadId,
       pages: data.length,
       duration: `${totalDuration}ms`,
@@ -316,7 +317,7 @@ router.post('/pdf2img', async (req, res) => {
       tracker.finish(false, error);
 
       // 生产环境基础日志：队列满拒绝
-      logger.prod(`[${requestId}] 请求拒绝(队列满)`, {
+      logger.prod(`请求拒绝(队列满)`, {
         globalPadId,
         duration: `${totalDuration}ms`,
         queue: requestSemaphore.getStatus().queue,
@@ -335,7 +336,7 @@ router.post('/pdf2img', async (req, res) => {
     const totalDuration = Date.now() - startTime;
     
     // 生产环境基础日志：请求失败
-    logger.prod(`[${requestId}] 请求失败`, {
+    logger.prod(`请求失败`, {
       globalPadId,
       duration: `${totalDuration}ms`,
       error: error.message,
