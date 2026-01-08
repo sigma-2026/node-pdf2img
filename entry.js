@@ -112,12 +112,13 @@ const ldLibraryPathEnv = `LD_LIBRARY_PATH=${ldLibraryPath}`;
 const name = `--name "prod-pdf2img-server"`;             // 进程命名
 const instances = `-i 3`;                  // cluster 模式：使用3个实例
 const memmory = `--max-memory-restart 1G`;               // 内存超1GB自动重启
-const cron = `--cron "0 4 * * *"`;                       // 每日UTC 04:00定时重启
+// 移除定时重启：在 K8s 环境中，由 K8s 管理 Pod 重启策略，避免所有 Pod 同时重启
+// const cron = `--cron "0 4 * * *"`;                    // 已移除：防止 120 个 Pod 同时重启
 const outLog = `--output /usr/src/app/pm2/logs/pdf2img.log`;  // 标准输出日志
 const errLog = `--error /usr/src/app/pm2/logs/pdf2img.log`;  // 错误输出日志
 
 // 组合稳定运行参数（cluster 模式）
-const stableStr = `${name} ${instances} ${memmory} ${cron} ${outLog} ${errLog}`;
+const stableStr = `${name} ${instances} ${memmory} ${outLog} ${errLog}`;
 
 // 注意：LD_LIBRARY_PATH 需要在命令前设置，确保 native-renderer 能找到 libpdfium.so
 const localCommand = `${baseCommand} && ${ldLibraryPathEnv} ${extraEnvStr} ${pm2Bin} start app.js ${stableStr}`;
