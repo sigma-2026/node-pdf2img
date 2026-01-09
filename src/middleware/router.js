@@ -283,19 +283,36 @@ router.post('/pdf2img', async (req, res) => {
 
     const data = await exportImage.pdfToImage({ pdfPath: url, pages });
     
-    // 获取使用的渲染器信息
+    // 获取使用的渲染器信息和文件大小
     const renderer = exportImage.renderer;
+    const pdfSize = exportImage.pdfSize;
 
     const summary = tracker.finish(true);
     const totalDuration = Date.now() - startTime;
     
-    // 生产环境基础日志：请求成功
-    logger.prod(`请求成功`, {
-      globalPadId,
-      pages: data.length,
-      duration: `${totalDuration}ms`,
-      renderer,
-    });
+    // 验证返回数据有效性（生产环境需要 cosKey，开发环境需要 outputPath）
+    const validResults = data.filter(item => item.cosKey || item.outputPath);
+    const isSuccess = validResults.length > 0 && validResults.length === data.length;
+    
+    // 生产环境基础日志
+    if (isSuccess) {
+      logger.prod(`请求成功`, {
+        globalPadId,
+        pages: data.length,
+        duration: `${totalDuration}ms`,
+        pdfSize: `${(pdfSize / 1024 / 1024).toFixed(2)}MB`,
+        renderer,
+      });
+    } else {
+      logger.prod(`请求完成但数据异常`, {
+        globalPadId,
+        totalPages: data.length,
+        validPages: validResults.length,
+        duration: `${totalDuration}ms`,
+        pdfSize: `${(pdfSize / 1024 / 1024).toFixed(2)}MB`,
+        renderer,
+      });
+    }
     
     // 开发/测试环境：输出详细性能数据
     if (IS_DEV || IS_TEST) {
