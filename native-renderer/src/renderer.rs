@@ -3,10 +3,9 @@
 use crate::config::RenderConfig;
 use crate::PageResult;
 use image::{ImageBuffer, Rgba};
-use image::codecs::webp::WebPEncoder;
 use napi::bindgen_prelude::*;
 use pdfium_render::prelude::*;
-use std::io::Cursor;
+use webp::Encoder as WebpEncoder;
 
 /// WebP 格式限制
 const WEBP_MAX_DIMENSION: u32 = 16383;
@@ -35,11 +34,23 @@ impl<'a> PdfRenderer<'a> {
             .load_pdf_from_byte_slice(pdf_data, None)
             .map_err(|e| format!("Failed to load PDF: {}", e))?;
 
+        self.render_document_pages(&document, page_nums)
+    }
+
+    /// 从已加载的 PdfDocument 渲染指定页面
+    ///
+    /// 这个方法允许外部代码先加载文档（例如通过流式加载），
+    /// 然后调用此方法进行渲染。
+    pub fn render_document_pages(
+        &self,
+        document: &PdfDocument,
+        page_nums: &[u32],
+    ) -> std::result::Result<(u32, Vec<PageResult>), String> {
         let num_pages = document.pages().len() as u32;
         let mut results = Vec::with_capacity(page_nums.len());
 
         for &page_num in page_nums {
-            let result = self.render_single_page(&document, page_num, num_pages);
+            let result = self.render_single_page(document, page_num, num_pages);
             results.push(result);
         }
 
@@ -253,17 +264,10 @@ impl<'a> PdfRenderer<'a> {
         let img: ImageBuffer<Rgba<u8>, _> = ImageBuffer::from_raw(width, height, rgba_data.to_vec())
             .ok_or_else(|| "Failed to create image buffer".to_string())?;
 
-        // 编码为 WebP（无损模式，image crate 的 WebP 编码器目前只支持无损）
-        let mut output = Cursor::new(Vec::new());
-        let encoder = WebPEncoder::new_lossless(&mut output);
-        
-        encoder.encode(
-            img.as_raw(),
-            width,
-            height,
-            image::ExtendedColorType::Rgba8,
-        ).map_err(|e| format!("WebP encode error: {}", e))?;
+        // 使用 webp crate 进行有损压缩
+        let encoder = WebpEncoder::from_rgba(img.as_raw(), width, height);
+        let webp_data = encoder.encode(self.config.webp_quality as f32);
 
-        Ok(output.into_inner())
+        Ok(webp_data.to_vec())
     }
 }

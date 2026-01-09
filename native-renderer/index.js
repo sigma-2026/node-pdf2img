@@ -310,10 +310,12 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { renderPages, getPageCount, isPdfiumAvailable, warmup, getVersion } = nativeBinding
+const { renderPages, getPageCount, isPdfiumAvailable, warmup, getVersion, renderPagesFromStream, completeStreamRequest } = nativeBinding
 
 module.exports.renderPages = renderPages
 module.exports.getPageCount = getPageCount
 module.exports.isPdfiumAvailable = isPdfiumAvailable
 module.exports.warmup = warmup
 module.exports.getVersion = getVersion
+module.exports.renderPagesFromStream = renderPagesFromStream
+module.exports.completeStreamRequest = completeStreamRequest

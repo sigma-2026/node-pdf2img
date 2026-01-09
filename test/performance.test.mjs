@@ -216,6 +216,7 @@ async function sendPdf2ImgRequest(pdfUrl, pages = [1]) {
     status: response.status,
     duration: endTime - startTime,
     data: data.data,
+    renderer: data.renderer || 'unknown',  // 获取渲染器信息
     error: data.message,
     pagesRequested: pages,
     pagesRendered: data.data?.length || 0,
@@ -263,7 +264,7 @@ async function testPdfFile(filename, tracker, pages = 'all') {
   }
   
   // 输出结果
-  console.log(`\n${colors.green}✓ 转换成功${colors.reset}`);
+  console.log(`\n${colors.green}✓ 转换成功${colors.reset} ${colors.magenta}[${result.renderer.toUpperCase()}]${colors.reset}`);
   console.log(`\n${colors.yellow}【分片加载统计】${colors.reset}`);
   console.log(`  HTTP 请求数: ${colors.bold}${stats.requestCount}${colors.reset} 次`);
   console.log(`  总下载量: ${colors.bold}${formatBytes(stats.totalBytes)}${colors.reset}`);
@@ -301,6 +302,7 @@ async function testPdfFile(filename, tracker, pages = 'all') {
   return {
     filename,
     fileSize,
+    renderer: result.renderer,  // 添加渲染器信息
     ...stats,
     totalDuration,
     pagesRendered: result.pagesRendered,
@@ -445,14 +447,28 @@ async function testRealisticConcurrency(tracker, totalRequests = 20, maxConcurre
   const fileStats = {};
   results.forEach(r => {
     if (!fileStats[r.file]) {
-      fileStats[r.file] = { success: 0, fail: 0, durations: [] };
+      fileStats[r.file] = { success: 0, fail: 0, durations: [], renderers: {} };
     }
     if (r.success) {
       fileStats[r.file].success++;
+      // 统计渲染器使用情况
+      const renderer = r.renderer || 'unknown';
+      fileStats[r.file].renderers[renderer] = (fileStats[r.file].renderers[renderer] || 0) + 1;
     } else {
       fileStats[r.file].fail++;
     }
     fileStats[r.file].durations.push(r.duration);
+  });
+  
+  // 按渲染器分组统计
+  const rendererStats = {};
+  results.filter(r => r.success).forEach(r => {
+    const renderer = r.renderer || 'unknown';
+    if (!rendererStats[renderer]) {
+      rendererStats[renderer] = { count: 0, durations: [] };
+    }
+    rendererStats[renderer].count++;
+    rendererStats[renderer].durations.push(r.duration);
   });
   
   // 计算 P50, P90, P99
@@ -483,7 +499,15 @@ async function testRealisticConcurrency(tracker, totalRequests = 20, maxConcurre
   Object.entries(fileStats).forEach(([file, stat]) => {
     const avgFileDuration = stat.durations.reduce((a, b) => a + b, 0) / stat.durations.length;
     const successRate = ((stat.success / (stat.success + stat.fail)) * 100).toFixed(0);
-    console.log(`  ${file}: ${stat.success}/${stat.success + stat.fail} 成功 (${successRate}%), 平均 ${formatDuration(avgFileDuration)}`);
+    const rendererInfo = Object.entries(stat.renderers).map(([r, c]) => `${r}:${c}`).join(', ');
+    console.log(`  ${file}: ${stat.success}/${stat.success + stat.fail} 成功 (${successRate}%), 平均 ${formatDuration(avgFileDuration)} [${rendererInfo}]`);
+  });
+  
+  console.log(`\n${colors.yellow}【按渲染器统计】${colors.reset}`);
+  Object.entries(rendererStats).forEach(([renderer, stat]) => {
+    const avgDur = stat.durations.reduce((a, b) => a + b, 0) / stat.durations.length;
+    const color = renderer === 'native' ? colors.green : renderer === 'native-stream' ? colors.cyan : colors.yellow;
+    console.log(`  ${color}${renderer.toUpperCase()}${colors.reset}: ${stat.count} 次, 平均 ${formatDuration(avgDur)}`);
   });
   
   console.log(`\n${colors.yellow}【分片加载统计】${colors.reset}`);
@@ -604,22 +628,23 @@ async function runPerformanceTests() {
     console.log(`${'═'.repeat(70)}\n`);
     
     console.log(`${colors.yellow}【单文件测试汇总】${colors.reset}\n`);
-    console.log('┌─────────────┬──────────────┬───────────┬──────────────┬──────────┬────────────┐');
-    console.log('│ 文件        │ 文件大小     │ HTTP请求  │ 下载量       │ 下载占比 │ 总耗时     │');
-    console.log('├─────────────┼──────────────┼───────────┼──────────────┼──────────┼────────────┤');
+    console.log('┌─────────────┬──────────────┬───────────────┬───────────┬──────────────┬──────────┬────────────┐');
+    console.log('│ 文件        │ 文件大小     │ 渲染器        │ HTTP请求  │ 下载量       │ 下载占比 │ 总耗时     │');
+    console.log('├─────────────┼──────────────┼───────────────┼───────────┼──────────────┼──────────┼────────────┤');
     
     for (const r of results) {
-      const filename = r.filename.padEnd(11);
+      const filename = r.filename.substring(0, 11).padEnd(11);
       const fileSize = formatBytes(r.fileSize).padStart(10);
+      const renderer = (r.renderer || 'unknown').toUpperCase().padEnd(13);
       const requests = String(r.requestCount).padStart(7);
       const downloaded = formatBytes(r.totalBytes).padStart(10);
       const percentage = `${r.percentage}%`.padStart(6);
       const duration = formatDuration(r.totalDuration).padStart(8);
       
-      console.log(`│ ${filename} │ ${fileSize} │ ${requests} │ ${downloaded} │ ${percentage} │ ${duration} │`);
+      console.log(`│ ${filename} │ ${fileSize} │ ${renderer} │ ${requests} │ ${downloaded} │ ${percentage} │ ${duration} │`);
     }
     
-    console.log('└─────────────┴──────────────┴───────────┴──────────────┴──────────┴────────────┘');
+    console.log('└─────────────┴──────────────┴───────────────┴───────────┴──────────────┴──────────┴────────────┘');
     
     if (concurrencyResults.length > 0) {
       console.log(`\n${colors.yellow}【并发测试汇总】${colors.reset}\n`);

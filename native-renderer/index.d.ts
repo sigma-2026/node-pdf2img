@@ -84,3 +84,68 @@ export declare function isPdfiumAvailable(): boolean
 export declare function warmup(): number
 /** 获取版本信息 */
 export declare function getVersion(): string
+/** 流式渲染结果（包含额外的统计信息） */
+export interface StreamRenderResult {
+  /** 是否成功 */
+  success: boolean
+  /** 错误信息（如果整体失败） */
+  error?: string
+  /** PDF 总页数 */
+  numPages: number
+  /** 每页的渲染结果 */
+  pages: Array<PageResult>
+  /** 总耗时（毫秒） */
+  totalTime: number
+  /** 流式加载统计 */
+  streamStats?: StreamStats
+}
+/** 流式加载统计信息 */
+export interface StreamStats {
+  /** 总请求次数 */
+  totalRequests: number
+  /** 缓存命中次数 */
+  cacheHits: number
+  /** 缓存未命中次数 */
+  cacheMisses: number
+  /** 总下载字节数 */
+  totalBytesFetched: number
+}
+/** 流式请求参数 */
+export interface StreamFetchRequest {
+  /** 请求的起始偏移量 */
+  offset: number
+  /** 请求的字节数 */
+  size: number
+  /** 请求 ID，用于匹配响应 */
+  requestId: number
+}
+/**
+ * 从流式数据源渲染 PDF 页面（异步版本）
+ *
+ * 这个函数通过 JavaScript 回调按需获取 PDF 数据，
+ * 避免一次性下载整个文件，适合处理大文件。
+ *
+ * # Arguments
+ * * `pdf_size` - PDF 文件的总大小（字节）
+ * * `page_nums` - 要渲染的页码数组（从 1 开始）
+ * * `options` - 渲染配置选项
+ * * `fetcher` - JavaScript 回调函数，接收 (error, req) 参数
+ *              error: 错误对象（null 表示无错误）
+ *              req: { offset, size, requestId } 对象
+ *              需要异步获取数据后调用 completeStreamRequest
+ *
+ * # Returns
+ * Promise<StreamRenderResult>
+ */
+export declare function renderPagesFromStream(pdfSize: number, pageNums: number[], options: RenderOptions | null | undefined, fetcher: (error: Error | null, req: StreamFetchRequest) => void): Promise<StreamRenderResult>
+/**
+ * 完成流式请求
+ *
+ * 当 JS 端获取到数据后，调用这个函数将数据发送给 Rust 端。
+ *
+ * # Arguments
+ * * `request_id` - 请求 ID（从 fetcher 回调中获取）
+ * * `data` - 获取到的数据（成功时）
+ * * `error` - 错误信息（失败时）
+ */
+export declare function completeStreamRequest(requestId: number, data: Buffer | null, error: string | null): void

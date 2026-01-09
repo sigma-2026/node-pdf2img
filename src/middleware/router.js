@@ -282,6 +282,9 @@ router.post('/pdf2img', async (req, res) => {
     tracker.event('startPdfToImage', { pages: Array.isArray(pages) ? pages.length : pages });
 
     const data = await exportImage.pdfToImage({ pdfPath: url, pages });
+    
+    // 获取使用的渲染器信息
+    const renderer = exportImage.renderer;
 
     const summary = tracker.finish(true);
     const totalDuration = Date.now() - startTime;
@@ -291,6 +294,7 @@ router.post('/pdf2img', async (req, res) => {
       globalPadId,
       pages: data.length,
       duration: `${totalDuration}ms`,
+      renderer,
     });
     
     // 开发/测试环境：输出详细性能数据
@@ -298,6 +302,7 @@ router.post('/pdf2img', async (req, res) => {
       logger.perf(`[${requestId}] 请求完成`, {
         totalDuration,
         pageCount: data.length,
+        renderer,
         phases: summary.phases,
       });
     }
@@ -306,6 +311,7 @@ router.post('/pdf2img', async (req, res) => {
       code: 200,
       data,
       message: 'ok',
+      renderer,  // 返回使用的渲染器
       ...(IS_DEV && METRICS_ENABLED ? { _metrics: summary } : {}),
     });
   } catch (error) {

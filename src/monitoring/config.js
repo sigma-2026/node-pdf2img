@@ -9,26 +9,25 @@ import { createLogger, IS_DEV } from '../utils/logger.js';
 const logger = createLogger('Config');
 
 // ==================== 分片加载配置 ====================
-// 分片大小（字节）- 根据文件大小动态调整
-// 分片下载速度很快，适当提高分片大小减少请求次数
+// V10: 生产环境优化 - 更大的分片，更少的请求
 export const CHUNK_SIZE_CONFIG = {
   // 小文件（<5MB）使用较大分片
   SMALL_FILE_THRESHOLD: parseInt(process.env.SMALL_FILE_THRESHOLD) || 5 * 1024 * 1024,
-  SMALL_FILE_CHUNK_SIZE: parseInt(process.env.SMALL_FILE_CHUNK_SIZE) || 1 * 1024 * 1024, // 1MB
+  SMALL_FILE_CHUNK_SIZE: parseInt(process.env.SMALL_FILE_CHUNK_SIZE) || 2 * 1024 * 1024, // 2MB (1MB -> 2MB)
   
   // 中等文件（5-50MB）
   MEDIUM_FILE_THRESHOLD: parseInt(process.env.MEDIUM_FILE_THRESHOLD) || 50 * 1024 * 1024,
-  MEDIUM_FILE_CHUNK_SIZE: parseInt(process.env.MEDIUM_FILE_CHUNK_SIZE) || 2 * 1024 * 1024, // 2MB
+  MEDIUM_FILE_CHUNK_SIZE: parseInt(process.env.MEDIUM_FILE_CHUNK_SIZE) || 5 * 1024 * 1024, // 5MB (2MB -> 5MB)
   
   // 大文件（>50MB）
-  LARGE_FILE_CHUNK_SIZE: parseInt(process.env.LARGE_FILE_CHUNK_SIZE) || 4 * 1024 * 1024, // 4MB
+  LARGE_FILE_CHUNK_SIZE: parseInt(process.env.LARGE_FILE_CHUNK_SIZE) || 8 * 1024 * 1024, // 8MB (4MB -> 8MB)
 };
 
 // 分片并发与请求控制
 export const RANGE_CONFIG = {
   // 最大并发 Range 请求数（避免 socket hang up / 过载）
-  // 默认是 4，对于并行渲染的 Worker 来说太低了，提高到 8
-  MAX_CONCURRENCY: parseInt(process.env.RANGE_MAX_CONCURRENCY) || 8,
+  // V10: 8 -> 6，减少并发避免服务端压力
+  MAX_CONCURRENCY: parseInt(process.env.RANGE_MAX_CONCURRENCY) || 6,
 };
 
 // 初始数据长度（首片，用于获取元数据+首页）
@@ -49,7 +48,8 @@ export const TIMEOUT_CONFIG = {
   MAX_TIMEOUT: parseInt(process.env.MAX_TIMEOUT) || 300000, // 5分钟
   
   // 分片请求超时
-  RANGE_REQUEST_TIMEOUT: parseInt(process.env.RANGE_REQUEST_TIMEOUT) || 15000, // 15s
+  // V10: 15s -> 25s，更容忍网络抖动
+  RANGE_REQUEST_TIMEOUT: parseInt(process.env.RANGE_REQUEST_TIMEOUT) || 25000, // 25s
 };
 
 // ==================== 重试配置 ====================
@@ -66,21 +66,50 @@ export const RETRY_CONFIG = {
 
 // ==================== 渲染配置 ====================
 export const RENDER_CONFIG = {
-  // 渲染缩放比例
+  // ==================== 目标尺寸配置 ====================
+  // 目标渲染宽度（像素）
+  TARGET_RENDER_WIDTH: parseInt(process.env.TARGET_RENDER_WIDTH) || 1280,
+  
+  // 图片密集型页面的目标宽度（像素）
+  IMAGE_HEAVY_TARGET_WIDTH: parseInt(process.env.IMAGE_HEAVY_TARGET_WIDTH) || 1024,
+  
+  // 最大渲染缩放比例
+  MAX_RENDER_SCALE: parseFloat(process.env.MAX_RENDER_SCALE) || 4.0,
+  
+  // 渲染缩放比例（兼容旧配置）
   RENDER_SCALE: parseFloat(process.env.RENDER_SCALE) || 1.5,
   
-  // 大页面降级阈值（像素）- 降低阈值，更早触发降级
-  LARGE_PAGE_THRESHOLD: parseInt(process.env.LARGE_PAGE_THRESHOLD) || 2000 * 2000, // 4MP（从 9MP 降低）
+  // ==================== 页面尺寸限制 ====================
+  // 大页面降级阈值（像素）
+  LARGE_PAGE_THRESHOLD: parseInt(process.env.LARGE_PAGE_THRESHOLD) || 2000 * 2000, // 4MP
   
   // 大页面降级缩放比例
   LARGE_PAGE_SCALE: parseFloat(process.env.LARGE_PAGE_SCALE) || 1.0,
   
-  // 超大页面阈值（像素）- 进一步降级
+  // 超大页面阈值（像素）
   XLARGE_PAGE_THRESHOLD: parseInt(process.env.XLARGE_PAGE_THRESHOLD) || 4000 * 4000, // 16MP
   
   // 超大页面缩放比例
   XLARGE_PAGE_SCALE: parseFloat(process.env.XLARGE_PAGE_SCALE) || 0.75,
   
+  // ==================== WebP 编码配置 ====================
+  // WebP 质量（0-100）
+  WEBP_QUALITY: parseInt(process.env.WEBP_QUALITY) || 70,
+  
+  // WebP Alpha 通道质量（0-100）
+  WEBP_ALPHA_QUALITY: parseInt(process.env.WEBP_ALPHA_QUALITY) || 70,
+  
+  // WebP 编码努力程度（0-6，越高越慢但压缩率越好）
+  WEBP_EFFORT: parseInt(process.env.WEBP_EFFORT) || 2,
+  
+  /**
+   * WebP 格式限制
+   * MUST be kept in sync with WEBP_MAX_DIMENSION in native-renderer/src/renderer.rs
+   */
+  WEBP_MAX_DIMENSION: 16383,
+  WEBP_MAX_PIXELS: 16383 * 16383,
+  
+  // ==================== Worker 配置 ====================
   // 是否启用并行渲染（Worker 模式）
   PARALLEL_RENDER: process.env.PARALLEL_RENDER !== 'false',
 
@@ -88,8 +117,6 @@ export const RENDER_CONFIG = {
   RANGE_CONCURRENCY: parseInt(process.env.RANGE_CONCURRENCY) || 4,
   
   // 每个 Worker 处理的页数
-  // 说明：每个 Worker 解析一次 PDF，渲染多页，然后上传 COS
-  //      减少 PDF 解析次数和网络往返
   PAGES_PER_WORKER: parseInt(process.env.PAGES_PER_WORKER) || 6,
   
   // Worker 线程数
@@ -101,24 +128,29 @@ export const RENDER_CONFIG = {
   BATCH_PAGES_PER_WORKER: parseInt(process.env.BATCH_PAGES_PER_WORKER) || 6,
   
   // ==================== Native Renderer 配置 ====================
+  // V10: 生产环境最优配置 - 让 Stream 模式更早介入
+  
   // Native renderer 文件大小阈值（字节）
-  // 小于此阈值的文件使用 native-renderer (Rust + PDFium)
-  // 大于此阈值的文件使用 pdfjs + 分片加载
-  NATIVE_RENDERER_THRESHOLD: parseInt(process.env.NATIVE_RENDERER_THRESHOLD) || 8 * 1024 * 1024, // 3MB
+  // V10: 12MB -> 8MB，让 Stream 模式更早介入
+  NATIVE_RENDERER_THRESHOLD: parseInt(process.env.NATIVE_RENDERER_THRESHOLD) || 8 * 1024 * 1024, // 8MB
   
   // Native renderer 文件大小上限（字节）
-  // 超过此值强制使用 pdfjs（稳定性考虑）
-  NATIVE_RENDERER_MAX_SIZE: parseInt(process.env.NATIVE_RENDERER_MAX_SIZE) || 20 * 1024 * 1024, // 20MB
+  NATIVE_RENDERER_MAX_SIZE: parseInt(process.env.NATIVE_RENDERER_MAX_SIZE) || 30 * 1024 * 1024, // 30MB
   
-  // 扫描件判定阈值：字节/页（Bytes Per Page）
-  // 超过此值判定为扫描件/图片密集型 PDF，优先使用 native renderer
+  // Native Stream 阈值（字节）
+  // V10: 12MB -> 8MB，让大于 8MB 的文件立即享受 native-stream 的亚秒级性能
+  NATIVE_STREAM_THRESHOLD: parseInt(process.env.NATIVE_STREAM_THRESHOLD) || 8 * 1024 * 1024, // 8MB
+  
+  // 是否启用 native-stream 模式
+  NATIVE_STREAM_ENABLED: process.env.NATIVE_STREAM_ENABLED !== 'false',
+  
+  // 扫描件判定阈值：字节/页
   SCAN_BPP_THRESHOLD: parseInt(process.env.SCAN_BPP_THRESHOLD) || 250 * 1024, // 250KB/页
   
-  // 复杂页面判定阈值：字节/页（Bytes Per Page）
-  // 在机会窗口内(3-20MB)，超过此值判定为复杂页面，优先使用 native renderer
+  // 复杂页面判定阈值：字节/页
   COMPLEX_PAGE_BPP_THRESHOLD: parseInt(process.env.COMPLEX_PAGE_BPP_THRESHOLD) || 500 * 1024, // 500KB/页
   
-  // 是否启用 native renderer（可通过环境变量禁用）
+  // 是否启用 native renderer
   NATIVE_RENDERER_ENABLED: process.env.NATIVE_RENDERER_ENABLED !== 'false',
 };
 

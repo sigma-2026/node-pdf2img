@@ -1,5 +1,5 @@
 /**
- * PDF 转图片核心模块 - 终极架构 V6
+ * PDF 转图片核心模块 - 终极架构 V8
  * 
  * 架构（PDF.js 侦察 + PDFium 主力 + 智能决策引擎）：
  * 
@@ -7,25 +7,34 @@
  *    - 通过 getPdfInfo() 发起一次小的 Range 请求，获取 pdfSize 和 initialData
  *    - 利用 pdf.js 和 initialData，快速解析出 numPages（几乎瞬时）
  * 
- * 2. 主线程决策阶段（V6 智能决策引擎）：
+ * 2. 主线程决策阶段（V8 智能决策引擎）：
  *    - 规则 1: 单页文件规则 - 单页文件用 native 总是更快
  *    - 规则 2: 小文件规则 - 文件 <= 3MB，无条件 native
- *    - 规则 3: 大文件规则 - 文件 > 20MB，强制 pdfjs
+ *    - 规则 3: 大文件规则 - 文件 > 20MB，使用 native-stream（流式加载 + PDFium）
  *    - 规则 4: 复杂页面规则 - 高 BPP (>500KB/页)，判定为复杂页面，使用 native
  *    - 规则 5: 默认 - 中型普通文档使用 pdfjs 分片加载
  * 
  * 3. 主线程准备与分发：
  *    - native 路径：下载完整 PDF Buffer，通过 Transferable Object 高效传递给 Worker
+ *    - native-stream 路径：传递 pdfUrl 和 pdfSize，Worker 内部按需获取数据 [V8 新增]
  *    - pdfjs 路径：将 pdfUrl 和 initialData 分发给 Worker，Worker 内部分片加载
  * 
  * 4. Worker 执行阶段：
  *    - 原生模式：接收 pdfData，直接调用 native-renderer
+ *    - 原生流模式：接收 pdfUrl，通过回调按需获取数据，PDFium 渲染 [V8 新增]
  *    - pdf.js 模式：接收 pdfUrl，执行分片加载和渲染
+ * 
+ * V8 新增：Native Stream 模式
+ * - 结合了 PDFium 的高性能渲染和 HTTP Range 请求的网络效率
+ * - 适用于大文件（> 20MB），避免一次性下载整个 PDF
+ * - Rust 端实现 LRU 缓存（256KB 块，最多 64 块），减少重复请求
+ * - 通过 NAPI-RS ThreadsafeFunction 实现 Rust 同步 I/O 与 JS 异步 fetch 的桥接
  * 
  * 优势：
  * - 决策快：主线程用最小成本获取全局最优决策所需信息
  * - 路径最优：扫描件、单页文件、复杂页面使用 native 渲染
- * - 安全回退：超大文件自动回退到稳定的 pdfjs 方案
+ * - 大文件优化：超大文件使用 native-stream，兼顾性能和内存
+ * - 安全回退：native-stream 不可用时自动回退到 pdfjs
  * - 职责清晰：主线程负责 I/O 和决策，Worker 负责执行
  */
 
@@ -40,70 +49,94 @@ import { RENDER_CONFIG } from '../monitoring/config.js';
 // 配置
 const OUTPUT_DIR = process.env.OUTPUT_DIR || './output';
 
-// ==================== 智能决策函数 V6 ====================
+// ==================== 智能决策函数 V10 ====================
 
 /**
- * [V6 最终版] 智能决策函数：根据 PDF 特性选择最优渲染引擎
+ * [V10 版 - 生产环境优化] 智能决策函数
+ * 
+ * 核心思想：
+ * 优先使用性能最高的 Native 和 Native-Stream 模式，消除 PDF.js 性能洼地。
+ * PDF.js 的角色从主力变为在 Native 不可用时的备用方案。
  * 
  * 决策规则（按优先级）：
- * 1. 单页文件规则：只要文件不超过上限，单页文件用 native 总是更快
- * 2. 小文件规则：文件 <= 阈值 (3MB)，无条件使用 native
- * 3. 大文件规则：文件 > 上限 (20MB)，强制 pdfjs（稳定性保证）
- * 4. 复杂页面规则：机会窗口内 (3-20MB)，高 BPP (>500KB/页) 判定为复杂页面，使用 native
- * 5. 默认：中型普通文档使用 pdfjs 分片加载
+ * 0. 备用/回退规则：当 native 模块不可用时，所有流量都交给 pdfjs
+ * 1. 单页文件规则：单页文件（且大小在阈值内）总是用 native，效率最高
+ * 2. 中小文件规则：文件 <= 8MB，无条件使用 native (完整下载+渲染)
+ * 3. 大文件规则：文件 > 8MB，使用 native-stream (流式加载+原生渲染)
+ *    - native-stream 无大小上限，已验证 80MB 文件仅需 857ms
+ * 4. 备用规则：native-stream 被禁用时，回退到 pdfjs
+ * 
+ * V10 生产环境优化：
+ * - 让 Stream 模式更早介入（8MB 阈值）
+ * - 更大的分片减少请求次数
+ * - 更长的超时容忍网络抖动
  * 
  * @param {number} pdfSize - PDF 文件大小（字节）
- * @param {number} numPages - PDF 页数（0 表示未知）
- * @returns {{engine: 'native'|'pdfjs', reason: string}}
+ * @param {number} numPages - PDF 页数
+ * @param {boolean} nativeAvailable - native-renderer 是否可用
+ * @returns {{engine: 'native'|'native-stream'|'pdfjs', reason: string}}
  */
-function chooseRendererStrategy(pdfSize, numPages) {
+function chooseRendererStrategy(pdfSize, numPages, nativeAvailable = true) {
     const pdfSizeMB = pdfSize / 1024 / 1024;
-    const maxNativeSizeMB = RENDER_CONFIG.NATIVE_RENDERER_MAX_SIZE / 1024 / 1024;
-    
-    // ⭐ 规则 1: 单页文件规则
-    // 只要文件不大到离谱，单页文件用原生总是更快（分片加载对单页无意义）
-    if (numPages === 1 && pdfSize <= RENDER_CONFIG.NATIVE_RENDERER_MAX_SIZE) {
-        return { 
-            engine: 'native', 
-            reason: `单页文件 (${pdfSizeMB.toFixed(1)}MB)，native 渲染效率最高` 
-        };
-    }
-    
-    // 规则 2: 小文件规则 - 文件非常小，无条件使用 native
-    if (pdfSize <= RENDER_CONFIG.NATIVE_RENDERER_THRESHOLD) {
-        return { 
-            engine: 'native', 
-            reason: `文件大小 (${pdfSizeMB.toFixed(1)}MB) <= 阈值 (${(RENDER_CONFIG.NATIVE_RENDERER_THRESHOLD / 1024 / 1024).toFixed(0)}MB)` 
-        };
-    }
-    
-    // 规则 3: 大文件规则 - 文件过大，强制 pdfjs 以保证稳定
-    if (pdfSize > RENDER_CONFIG.NATIVE_RENDERER_MAX_SIZE) {
-        return { 
-            engine: 'pdfjs', 
-            reason: `文件大小 (${pdfSizeMB.toFixed(1)}MB) > 上限 (${maxNativeSizeMB.toFixed(0)}MB)，优先考虑稳定性` 
+
+    // 获取统一配置
+    const smallFileThreshold = RENDER_CONFIG.NATIVE_RENDERER_THRESHOLD;      // 8MB - native 完整下载阈值
+    const streamThreshold = RENDER_CONFIG.NATIVE_STREAM_THRESHOLD;           // 8MB - native-stream 启用阈值
+    const complexBppThreshold = RENDER_CONFIG.COMPLEX_PAGE_BPP_THRESHOLD;    // 500KB/页
+
+    // ⭐ 规则 0: 备用/回退规则
+    // 如果 native 模块不可用，所有流量都交给 pdfjs
+    if (!nativeAvailable || !RENDER_CONFIG.NATIVE_RENDERER_ENABLED) {
+        return {
+            engine: 'pdfjs',
+            reason: `Native renderer 不可用，回退到 pdfjs`,
         };
     }
 
-    // ⭐ 规则 4: 复杂页面规则（超大页面规则）
-    // 在机会窗口内 (3-20MB)，根据"字节/页"比率决策
-    // 高 BPP 意味着页面内容复杂（扫描件/矢量图形密集），pdf.js 会很慢
-    if (numPages > 0) {
-        const bytesPerPage = pdfSize / numPages;
-        const complexThreshold = RENDER_CONFIG.COMPLEX_PAGE_BPP_THRESHOLD || 500 * 1024;
-        
-        if (bytesPerPage > complexThreshold) {
-            return { 
-                engine: 'native', 
-                reason: `高 Bytes/Page (${(bytesPerPage / 1024).toFixed(0)}KB/页 > ${(complexThreshold / 1024).toFixed(0)}KB)，判定为复杂页面/扫描件` 
+    // ⭐ 规则 1: 单页文件规则 (最优先)
+    // 单页文件用原生总是更快（分片加载对单页无意义）
+    // 单页文件使用 native 完整下载，限制在合理大小内
+    if (numPages === 1 && pdfSize <= smallFileThreshold) {
+        return {
+            engine: 'native',
+            reason: `单页文件 (${pdfSizeMB.toFixed(1)}MB)，native 渲染效率最高`,
+        };
+    }
+
+    // ⭐ 规则 2: 中小文件规则 (<= 8MB) -> 使用 Native
+    if (pdfSize <= smallFileThreshold) {
+        // 在这个区间内，增加一个复杂页面的修正判断
+        if (numPages > 0) {
+            const bytesPerPage = pdfSize / numPages;
+            if (bytesPerPage > complexBppThreshold) {
+                return {
+                    engine: 'native',
+                    reason: `高 BPP (${(bytesPerPage / 1024).toFixed(0)}KB/页)，判定为复杂扫描件，强制使用 native`,
+                };
+            }
+        }
+        return {
+            engine: 'native',
+            reason: `文件大小 (${pdfSizeMB.toFixed(1)}MB) <= 阈值 (${(smallFileThreshold / 1024 / 1024).toFixed(0)}MB)，使用 native`,
+        };
+    }
+    
+    // ⭐ 规则 3: 大文件规则 (> 8MB) -> 使用 Native Stream
+    // native-stream 无大小上限，已验证 80MB 文件仅需 857ms
+    if (pdfSize > streamThreshold) {
+        if (RENDER_CONFIG.NATIVE_STREAM_ENABLED !== false) {
+            return {
+                engine: 'native-stream',
+                reason: `文件大小 (${pdfSizeMB.toFixed(1)}MB) > 阈值 (${(streamThreshold / 1024 / 1024).toFixed(0)}MB)，使用 native-stream`,
             };
         }
     }
     
-    // 规则 5: 默认 - 中型普通文档使用 pdfjs 分片加载
-    return { 
-        engine: 'pdfjs', 
-        reason: `中型普通文档 (${pdfSizeMB.toFixed(1)}MB, ${numPages}页)，使用 pdfjs 分片加载` 
+    // ⭐ 规则 4: 备用规则
+    // 只有在 native-stream 被禁用时才会到达这里
+    return {
+        engine: 'pdfjs',
+        reason: `native-stream 被禁用，回退到 pdfjs`,
     };
 }
 
@@ -118,6 +151,7 @@ class Pdf2Img {
         this.requestTracker = requestTracker;
         this.abortSignal = abortSignal;
         this.pdfSize = 0;
+        this.renderer = null;  // 记录使用的渲染器 (native/native-stream/pdfjs)
         this.logger = createLogger(globalPadId);
     }
 
@@ -177,17 +211,24 @@ class Pdf2Img {
             this.log('info', `PDF 特性: ${(pdfSize / 1024 / 1024).toFixed(2)}MB, ${numPages} 页 (侦察耗时: ${scoutTime}ms)`);
             
             // ========== 第二阶段：决策（主线程） ==========
-            const strategy = chooseRendererStrategy(pdfSize, numPages);
-            const useNative = strategy.engine === 'native' && RENDER_CONFIG.NATIVE_RENDERER_ENABLED;
+            // V8: 传入 nativeStreamAvailable 参数，决策引擎会考虑 native-stream 模式
+            const nativeStreamAvailable = RENDER_CONFIG.NATIVE_RENDERER_ENABLED;
+            const strategy = chooseRendererStrategy(pdfSize, numPages, nativeStreamAvailable);
+            
+            // 记录使用的渲染器
+            this.renderer = strategy.engine;
             
             this.log('info', `🚀 渲染策略: ${strategy.engine.toUpperCase()} (${strategy.reason})`);
             
             // ========== 第三阶段：准备与分发 ==========
             let result;
             
-            if (useNative) {
-                // ----- Native 路径 -----
+            if (strategy.engine === 'native' && RENDER_CONFIG.NATIVE_RENDERER_ENABLED) {
+                // ----- Native 路径（小文件，完整下载后渲染） -----
                 result = await this.executeNativePath(pool, pdfPath, pages, numPages, pdfSize, uploadToCos, fullDataCopy, isSmallFile);
+            } else if (strategy.engine === 'native-stream' && RENDER_CONFIG.NATIVE_RENDERER_ENABLED) {
+                // ----- Native Stream 路径（大文件，流式加载 + PDFium 渲染）[V8 新增] -----
+                result = await this.executeNativeStreamPath(pool, pdfPath, pages, numPages, pdfSize, uploadToCos);
             } else {
                 // ----- PDF.js 路径 -----
                 result = await this.executePdfjsPath(pool, pdfPath, pages, numPages, pdfSize, uploadToCos);
@@ -272,6 +313,55 @@ class Pdf2Img {
                 pageNum: result.results[0].pageNum,
                 ttffMs,
                 mode: 'native',
+            });
+        }
+        
+        return result;
+    }
+
+    /**
+     * Native Stream 渲染路径 [V8 新增]
+     * 
+     * 流程：
+     * 1. 将 pdfUrl 和 pdfSize 传递给 Worker
+     * 2. Worker 定义 fetcher 回调函数
+     * 3. Rust 端按需调用 fetcher 获取数据（HTTP Range 请求）
+     * 4. PDFium 渲染，结合了原生渲染性能和流式加载的网络效率
+     * 
+     * 适用场景：
+     * - 大文件（> 20MB）
+     * - 需要高质量渲染但不想一次性下载整个文件
+     */
+    async executeNativeStreamPath(pool, pdfPath, pages, numPages, pdfSize, uploadToCos) {
+        // 确定目标页码
+        // 注意：如果 numPages=0（侦察失败），传递原始 pages 参数让 Worker 自己解析
+        let targetPages = numPages > 0 
+            ? this.determineTargetPages(pages, numPages)
+            : null;  // null 表示让 Worker 自己确定页码
+        
+        // 构建任务数据
+        const taskData = {
+            pdfUrl: pdfPath,
+            pageNums: targetPages,
+            pagesParam: pages,  // 原始 pages 参数，供 Worker 在 numPages=0 时使用
+            globalPadId: this.globalPadId,
+            uploadToCos,
+            pdfSize,
+            numPages,
+            useNativeStream: true,  // 明确指示使用 native stream 模式
+        };
+        
+        this.requestTracker?.startPhase('render');
+        const result = await pool.run(taskData, { signal: this.abortSignal });
+        this.requestTracker?.endPhase('render');
+        
+        // 首张图片事件
+        if (result.results?.length > 0) {
+            const ttffMs = Date.now() - this.requestTracker?.phases?.scout?.start || 0;
+            this.requestTracker?.event('firstImageReady', {
+                pageNum: result.results[0].pageNum,
+                ttffMs,
+                mode: 'native-stream',
             });
         }
         
