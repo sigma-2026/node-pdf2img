@@ -103,18 +103,70 @@ pnpm clean
 
 ## 发布流程
 
+本项目使用 Orange CI 自动发包，基于 [semantic-release](https://semantic-release.gitbook.io/) 实现语义化版本管理。
+
+### 分支发布规则
+
+| 分支 | dist-tag | 版本示例 | 说明 |
+|------|----------|----------|------|
+| `master` / `main` | `latest` | `1.0.0`, `1.1.0` | 正式版本 |
+| `beta/*` | `beta` | `1.0.1-beta.xxx.1` | 测试版本 |
+| `next` | `next` | `2.0.0-next.1` | 大版本预发布 |
+
+### 版本升级规则
+
+版本号根据 commit message 自动升级：
+
+| Commit 类型 | 版本变化 | 示例 |
+|-------------|----------|------|
+| `BREAKING CHANGE` | major | `1.0.0` → `2.0.0` |
+| `feat` | minor | `1.0.0` → `1.1.0` |
+| `perf` | minor | `1.0.0` → `1.1.0` |
+| `fix` | patch | `1.0.0` → `1.0.1` |
+| `refactor` | patch | `1.0.0` → `1.0.1` |
+
+### 提交规范
+
+遵循 [约定式提交规范](https://www.conventionalcommits.org/zh-hans/)：
+
 ```bash
-# 1. 构建原生渲染器
-cd packages/native-renderer
-pnpm build
+# 功能新增 (minor)
+git commit -m "feat(converter): add support for TIFF format"
 
-# 2. 运行测试
-cd ../pdf2img
-pnpm test
+# Bug 修复 (patch)
+git commit -m "fix(cli): fix output path handling on Windows"
 
-# 3. 发布
-npm publish --access public
+# 破坏性变更 (major)
+git commit -m "feat(api): change convert() return type
+
+BREAKING CHANGE: convert() now returns Promise<Result> instead of Result"
 ```
+
+### 发布测试包
+
+```bash
+# 从 master 创建 beta 分支
+git checkout -b beta/my-feature
+git push origin beta/my-feature
+
+# 后续提交会自动发布 beta 版本
+git commit -m "feat: add new feature"
+git push
+```
+
+### 手动发布（不推荐）
+
+```bash
+# 仅用于紧急情况
+cd packages/pdf2img
+npm publish --no-git-checks
+```
+
+### 首次发布注意事项
+
+1. `package.json` 的 `version` 不能是 `1.0.0`（semantic-release 会自动升级到 1.0.0）
+2. 首次发布前需打 tag：`git tag v0.1.0 && git push --tags origin`
+3. 确保 `qconn_arsvn` 已添加为仓库 master 成员
 
 ## 架构说明
 
