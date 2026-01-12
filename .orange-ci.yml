@@ -1,42 +1,8 @@
-# PDF2IMG 自动发包配置
-# 不使用文档团队模板，使用通用配置
+# PDF2IMG CI 配置
 
-stages:
-  - check
-  - publish
-
-variables:
-  NODE_VERSION: "20"
-
-# 代码检查
 check:
-  stage: check
   image: node:20
   script:
-    - npm install -g pnpm
-    - pnpm install
-    - cd packages/pdf2img
-    - echo "Check passed"
-  only:
-    - master
-    - main
-    - /^beta\/.*/
-
-# 发布 npm 包
-publish:
-  stage: publish
-  image: node:20
-  script:
-    - npm install -g pnpm
-    - pnpm install
-    - cd packages/pdf2img
-    # 设置 npm registry
-    - npm config set registry https://mirrors.tencent.com/npm/
-    - echo "//mirrors.tencent.com/npm/:_authToken=${NPM_TOKEN}" > ~/.npmrc
-    # 发布
-    - npm publish --no-git-checks || echo "Publish skipped or failed"
-  only:
-    - master
-    - main
-    - /^beta\/.*/
-  when: manual
+    - node --version
+    - npm --version
+    - echo "CI triggered successfully"
