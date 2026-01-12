@@ -1,8 +1,3 @@
-# PDF2IMG CI 配置
-
-check:
-  image: node:20
-  script:
-    - node --version
-    - npm --version
-    - echo "CI triggered successfully"
+include:
+  # npm 发包模板
+  - https://git.woa.com/tencent-docs-epc/oci-template/blob/master/docs-npm-template.yml
