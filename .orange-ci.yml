@@ -2,15 +2,41 @@ include:
   # npm 发包模板
   - https://git.woa.com/tencent-docs-epc/oci-template/blob/master/docs-npm-template.yml
 
+# 覆盖模板的 npm ci，改用 pnpm
+variables:
+  USE_PNPM: "true"
+
 # 多平台 Native 构建（使用交叉编译）
 stages:
   - build-native
   - merge-artifacts
 
+# 使用 pnpm 安装依赖（覆盖模板默认的 npm ci）
+install-deps:
+  stage: .pre
+  image: node:20
+  push:
+    - branches:
+        include:
+          - master
+          - main
+          - beta/*
+          - next
+  script:
+    - npm install -g pnpm@latest
+    - pnpm install --frozen-lockfile
+  artifacts:
+    paths:
+      - node_modules/
+      - packages/*/node_modules/
+
 # ==================== Linux x64 ====================
 build-linux-x64:
   stage: build-native
   image: node:20
+  needs:
+    - job: install-deps
+      artifacts: true
   push:
     - branches:
         include:
@@ -23,8 +49,7 @@ build-linux-x64:
     - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
     - export PATH="$HOME/.cargo/bin:$PATH"
     - cd packages/native-renderer
-    - npm install
-    - npm run build
+    - pnpm run build
     - mkdir -p ../../artifacts
     - cp *.node ../../artifacts/ || true
     - cp libpdfium.so ../../artifacts/ || true
@@ -36,6 +61,9 @@ build-linux-x64:
 build-linux-arm64:
   stage: build-native
   image: node:20
+  needs:
+    - job: install-deps
+      artifacts: true
   push:
     - branches:
         include:
@@ -55,8 +83,7 @@ build-linux-arm64:
       linker = "aarch64-linux-gnu-gcc"
       EOF
     - cd packages/native-renderer
-    - npm install
-    - npx napi build --platform --release --target aarch64-unknown-linux-gnu
+    - pnpm napi build --platform --release --target aarch64-unknown-linux-gnu
     - mkdir -p ../../artifacts
     - cp *.node ../../artifacts/ || true
   artifacts:
@@ -67,6 +94,9 @@ build-linux-arm64:
 build-macos-x64:
   stage: build-native
   image: node:20
+  needs:
+    - job: install-deps
+      artifacts: true
   push:
     - branches:
         include:
@@ -79,14 +109,10 @@ build-macos-x64:
     - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
     - export PATH="$HOME/.cargo/bin:$PATH"
     - rustup target add x86_64-apple-darwin
-    # 安装 osxcross 工具链
-    - git clone --depth 1 https://github.com/AcademySoftwareFoundation/OpenTimelineIO.git /tmp/osxcross-check || true
-    # 使用 cargo-zigbuild 进行交叉编译（更简单）
-    - cargo install cargo-zigbuild
+    - cargo install cargo-zigbuild || true
     - pip3 install ziglang || apt-get install -y python3-pip && pip3 install ziglang
     - cd packages/native-renderer
-    - npm install
-    - npx napi build --platform --release --target x86_64-apple-darwin --cross-compile || echo "macOS cross-compile may need manual setup"
+    - pnpm napi build --platform --release --target x86_64-apple-darwin --cross-compile || echo "macOS cross-compile may need manual setup"
     - mkdir -p ../../artifacts
     - cp *.node ../../artifacts/ || true
   artifacts:
@@ -98,6 +124,9 @@ build-macos-x64:
 build-macos-arm64:
   stage: build-native
   image: node:20
+  needs:
+    - job: install-deps
+      artifacts: true
   push:
     - branches:
         include:
@@ -113,8 +142,7 @@ build-macos-arm64:
     - cargo install cargo-zigbuild || true
     - pip3 install ziglang || apt-get install -y python3-pip && pip3 install ziglang
     - cd packages/native-renderer
-    - npm install
-    - npx napi build --platform --release --target aarch64-apple-darwin --cross-compile || echo "macOS cross-compile may need manual setup"
+    - pnpm napi build --platform --release --target aarch64-apple-darwin --cross-compile || echo "macOS cross-compile may need manual setup"
     - mkdir -p ../../artifacts
     - cp *.node ../../artifacts/ || true
   artifacts:
@@ -126,6 +154,9 @@ build-macos-arm64:
 build-windows-x64:
   stage: build-native
   image: node:20
+  needs:
+    - job: install-deps
+      artifacts: true
   push:
     - branches:
         include:
@@ -145,8 +176,7 @@ build-windows-x64:
       linker = "x86_64-w64-mingw32-gcc"
       EOF
     - cd packages/native-renderer
-    - npm install
-    - npx napi build --platform --release --target x86_64-pc-windows-gnu
+    - pnpm napi build --platform --release --target x86_64-pc-windows-gnu
     - mkdir -p ../../artifacts
     - cp *.node ../../artifacts/ || true
   artifacts:
@@ -158,14 +188,9 @@ build-windows-x64:
 merge-artifacts:
   stage: merge-artifacts
   image: node:20
-  push:
-    - branches:
-        include:
-          - master
-          - main
-          - beta/*
-          - next
   needs:
+    - job: install-deps
+      artifacts: true
     - job: build-linux-x64
       artifacts: true
     - job: build-linux-arm64
@@ -179,6 +204,13 @@ merge-artifacts:
     - job: build-windows-x64
       artifacts: true
       optional: true
+  push:
+    - branches:
+        include:
+          - master
+          - main
+          - beta/*
+          - next
   script:
     - echo "Merging all platform artifacts..."
     - ls -la artifacts/ || true
