@@ -410,6 +410,88 @@ PDF 转图片。
 
 PDFium 库已随包一起分发，无需额外安装。
 
+## 多平台构建说明
+
+本项目使用 Rust + NAPI-RS 构建原生模块，支持以下平台：
+
+| 平台 | 架构 | 构建状态 |
+|------|------|----------|
+| Linux | x64 | ✅ Orange CI |
+| Linux | arm64 | ⚠️ OCI 交叉编译 |
+| macOS | x64 | ⚠️ 需要手动构建 |
+| macOS | arm64 | ⚠️ 需要手动构建 |
+| Windows | x64 | ⚠️ 需要手动构建 |
+
+### 构建流程
+
+#### 1. Linux 平台（OCI 自动构建）
+
+推送到以下分支会自动触发 Orange CI 构建：
+- `master` / `main`: 正式版本
+- `beta/*`: 测试版本
+- `next`: 大版本预览
+
+OCI 会构建 Linux x64 和 arm64 版本。
+
+#### 2. macOS / Windows 平台（手动构建）
+
+由于 Orange CI 没有 macOS/Windows 构建机，需要手动构建：
+
+**macOS x64 (Intel)**:
+```bash
+cd packages/native-renderer
+npm install
+npm run build
+# 产物：pdf-renderer.darwin-x64.node, libpdfium.dylib
+```
+
+**macOS arm64 (Apple Silicon)**:
+```bash
+cd packages/native-renderer
+npm install
+npm run build
+# 产物：pdf-renderer.darwin-arm64.node, libpdfium.dylib
+```
+
+**Windows x64**:
+```powershell
+cd packages\native-renderer
+npm install
+npm run build
+# 产物：pdf-renderer.win32-x64-msvc.node, pdfium.dll
+```
+
+#### 3. 合并所有平台产物
+
+将各平台构建产物放入 `packages/native-renderer/` 目录：
+
+```
+packages/native-renderer/
+├── index.js
+├── index.d.ts
+├── package.json
+├── pdf-renderer.linux-x64-gnu.node      # Linux x64
+├── pdf-renderer.linux-arm64-gnu.node    # Linux arm64
+├── pdf-renderer.darwin-x64.node         # macOS x64
+├── pdf-renderer.darwin-arm64.node       # macOS arm64
+├── pdf-renderer.win32-x64-msvc.node     # Windows x64
+├── libpdfium.so                         # Linux PDFium
+├── libpdfium.dylib                      # macOS PDFium
+└── pdfium.dll                           # Windows PDFium
+```
+
+#### 4. 发布包
+
+提交并推送代码到发布分支：
+
+```bash
+git add packages/native-renderer/
+git commit -m "feat: update native modules for all platforms"
+git push origin master  # 或 beta/* 分支
+```
+
+Orange CI 会自动发布 npm 包。
+
 ## 许可证
 
 MIT
