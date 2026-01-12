@@ -1,3 +1,33 @@
 include:
   # npm 发包模板
   - https://git.woa.com/tencent-docs-epc/oci-template/blob/master/docs-npm-template.yml
+
+# 自定义 Linux x64 Native 构建（OCI 仅支持 Linux）
+# macOS 和 Windows 构建需要通过 GitHub Actions 完成
+
+stages:
+  - build-native
+
+build-linux-x64:
+  stage: build-native
+  image: node:20
+  push:
+    - branches:
+        include:
+          - master
+          - main
+          - beta/*
+          - next
+  script:
+    - apt-get update && apt-get install -y curl build-essential
+    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    - export PATH="$HOME/.cargo/bin:$PATH"
+    - cd packages/native-renderer
+    - npm install
+    - npm run build
+    - echo "Built native module:"
+    - ls -la *.node *.so || true
+  artifacts:
+    paths:
+      - packages/native-renderer/*.node
+      - packages/native-renderer/libpdfium.so
