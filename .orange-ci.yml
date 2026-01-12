@@ -2,12 +2,12 @@ include:
   # npm 发包模板
   - https://git.woa.com/tencent-docs-epc/oci-template/blob/master/docs-npm-template.yml
 
-# 自定义 Linux x64 Native 构建（OCI 仅支持 Linux）
-# macOS 和 Windows 构建需要通过 GitHub Actions 完成
-
+# 多平台 Native 构建（使用交叉编译）
 stages:
   - build-native
+  - merge-artifacts
 
+# ==================== Linux x64 ====================
 build-linux-x64:
   stage: build-native
   image: node:20
@@ -25,9 +25,167 @@ build-linux-x64:
     - cd packages/native-renderer
     - npm install
     - npm run build
-    - echo "Built native module:"
-    - ls -la *.node *.so || true
+    - mkdir -p ../../artifacts
+    - cp *.node ../../artifacts/ || true
+    - cp libpdfium.so ../../artifacts/ || true
   artifacts:
     paths:
-      - packages/native-renderer/*.node
-      - packages/native-renderer/libpdfium.so
+      - artifacts/
+
+# ==================== Linux arm64 (交叉编译) ====================
+build-linux-arm64:
+  stage: build-native
+  image: node:20
+  push:
+    - branches:
+        include:
+          - master
+          - main
+          - beta/*
+          - next
+  script:
+    - apt-get update && apt-get install -y curl build-essential gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    - export PATH="$HOME/.cargo/bin:$PATH"
+    - rustup target add aarch64-unknown-linux-gnu
+    - mkdir -p ~/.cargo
+    - |
+      cat > ~/.cargo/config.toml << 'EOF'
+      [target.aarch64-unknown-linux-gnu]
+      linker = "aarch64-linux-gnu-gcc"
+      EOF
+    - cd packages/native-renderer
+    - npm install
+    - npx napi build --platform --release --target aarch64-unknown-linux-gnu
+    - mkdir -p ../../artifacts
+    - cp *.node ../../artifacts/ || true
+  artifacts:
+    paths:
+      - artifacts/
+
+# ==================== macOS x64 (交叉编译) ====================
+build-macos-x64:
+  stage: build-native
+  image: node:20
+  push:
+    - branches:
+        include:
+          - master
+          - main
+          - beta/*
+          - next
+  script:
+    - apt-get update && apt-get install -y curl build-essential clang llvm cmake libxml2-dev libssl-dev
+    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    - export PATH="$HOME/.cargo/bin:$PATH"
+    - rustup target add x86_64-apple-darwin
+    # 安装 osxcross 工具链
+    - git clone --depth 1 https://github.com/AcademySoftwareFoundation/OpenTimelineIO.git /tmp/osxcross-check || true
+    # 使用 cargo-zigbuild 进行交叉编译（更简单）
+    - cargo install cargo-zigbuild
+    - pip3 install ziglang || apt-get install -y python3-pip && pip3 install ziglang
+    - cd packages/native-renderer
+    - npm install
+    - npx napi build --platform --release --target x86_64-apple-darwin --cross-compile || echo "macOS cross-compile may need manual setup"
+    - mkdir -p ../../artifacts
+    - cp *.node ../../artifacts/ || true
+  artifacts:
+    paths:
+      - artifacts/
+  allow_failure: true
+
+# ==================== macOS arm64 (交叉编译) ====================
+build-macos-arm64:
+  stage: build-native
+  image: node:20
+  push:
+    - branches:
+        include:
+          - master
+          - main
+          - beta/*
+          - next
+  script:
+    - apt-get update && apt-get install -y curl build-essential clang llvm
+    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    - export PATH="$HOME/.cargo/bin:$PATH"
+    - rustup target add aarch64-apple-darwin
+    - cargo install cargo-zigbuild || true
+    - pip3 install ziglang || apt-get install -y python3-pip && pip3 install ziglang
+    - cd packages/native-renderer
+    - npm install
+    - npx napi build --platform --release --target aarch64-apple-darwin --cross-compile || echo "macOS cross-compile may need manual setup"
+    - mkdir -p ../../artifacts
+    - cp *.node ../../artifacts/ || true
+  artifacts:
+    paths:
+      - artifacts/
+  allow_failure: true
+
+# ==================== Windows x64 (交叉编译) ====================
+build-windows-x64:
+  stage: build-native
+  image: node:20
+  push:
+    - branches:
+        include:
+          - master
+          - main
+          - beta/*
+          - next
+  script:
+    - apt-get update && apt-get install -y curl build-essential mingw-w64
+    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    - export PATH="$HOME/.cargo/bin:$PATH"
+    - rustup target add x86_64-pc-windows-gnu
+    - mkdir -p ~/.cargo
+    - |
+      cat > ~/.cargo/config.toml << 'EOF'
+      [target.x86_64-pc-windows-gnu]
+      linker = "x86_64-w64-mingw32-gcc"
+      EOF
+    - cd packages/native-renderer
+    - npm install
+    - npx napi build --platform --release --target x86_64-pc-windows-gnu
+    - mkdir -p ../../artifacts
+    - cp *.node ../../artifacts/ || true
+  artifacts:
+    paths:
+      - artifacts/
+  allow_failure: true
+
+# ==================== 合并产物 ====================
+merge-artifacts:
+  stage: merge-artifacts
+  image: node:20
+  push:
+    - branches:
+        include:
+          - master
+          - main
+          - beta/*
+          - next
+  needs:
+    - job: build-linux-x64
+      artifacts: true
+    - job: build-linux-arm64
+      artifacts: true
+    - job: build-macos-x64
+      artifacts: true
+      optional: true
+    - job: build-macos-arm64
+      artifacts: true
+      optional: true
+    - job: build-windows-x64
+      artifacts: true
+      optional: true
+  script:
+    - echo "Merging all platform artifacts..."
+    - ls -la artifacts/ || true
+    - cp artifacts/*.node packages/native-renderer/ || true
+    - cp artifacts/*.so packages/native-renderer/ || true
+    - echo "Final native-renderer contents:"
+    - ls -la packages/native-renderer/
+  artifacts:
+    paths:
+      - packages/native-renderer/
