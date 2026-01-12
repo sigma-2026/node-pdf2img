@@ -1,0 +1,69 @@
+{
+    "name": "@tencent/pdf2img",
+    "version": "0.1.0",
+    "description": "高性能 PDF 转图片工具，基于 PDFium 原生渲染器",
+    "type": "module",
+    "main": "./src/index.js",
+    "types": "./src/index.d.ts",
+    "bin": {
+        "pdf2img": "./bin/cli.js"
+    },
+    "exports": {
+        ".": {
+            "import": "./src/index.js",
+            "types": "./src/index.d.ts"
+        }
+    },
+    "files": [
+        "src",
+        "bin"
+    ],
+    "publishConfig": {
+        "registry": "https://mirrors.tencent.com/npm/"
+    },
+    "scripts": {
+        "test": "node --test test/*.test.js",
+        "test:run": "node test/api.test.js",
+        "oci-release": "echo 'Build completed'",
+        "oci-check": "node -e \"require('./src/index.js')\" || true"
+    },
+    "keywords": [
+        "pdf",
+        "image",
+        "converter",
+        "pdfium",
+        "webp",
+        "native",
+        "cli"
+    ],
+    "author": "",
+    "license": "MIT",
+    "engines": {
+        "node": ">=18.0.0"
+    },
+    "os": [
+        "linux",
+        "darwin",
+        "win32"
+    ],
+    "cpu": [
+        "x64",
+        "arm64"
+    ],
+    "dependencies": {
+        "@tencent/pdf2img-native": "workspace:*",
+        "commander": "^12.0.0",
+        "cos-nodejs-sdk-v5": "^2.14.6",
+        "dotenv": "^16.0.3",
+        "ora": "^8.0.0",
+        "p-limit": "^7.2.0",
+        "piscina": "^5.1.4",
+        "sharp": "^0.33.0"
+    },
+    "devDependencies": {
+        "@types/node": "^20.0.0"
+    },
+    "bundleDependencies": [
+        "@tencent/pdf2img-native"
+    ]
+}

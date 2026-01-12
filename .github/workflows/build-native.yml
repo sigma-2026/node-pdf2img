@@ -1,0 +1,146 @@
+name: Build Native Modules
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'packages/native-renderer/**'
+      - '.github/workflows/build-native.yml'
+  pull_request:
+    branches: [main, master]
+    paths:
+      - 'packages/native-renderer/**'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x64 (glibc)
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            node_file: pdf-renderer.linux-x64-gnu.node
+            pdfium_lib: libpdfium.so
+
+          # Linux arm64 (glibc)
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            node_file: pdf-renderer.linux-arm64-gnu.node
+            pdfium_lib: libpdfium.so
+            use_cross: true
+
+          # macOS x64
+          - os: macos-13
+            target: x86_64-apple-darwin
+            node_file: pdf-renderer.darwin-x64.node
+            pdfium_lib: libpdfium.dylib
+
+          # macOS arm64 (Apple Silicon)
+          - os: macos-14
+            target: aarch64-apple-darwin
+            node_file: pdf-renderer.darwin-arm64.node
+            pdfium_lib: libpdfium.dylib
+
+          # Windows x64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            node_file: pdf-renderer.win32-x64-msvc.node
+            pdfium_lib: pdfium.dll
+
+    runs-on: ${{ matrix.os }}
+    name: Build ${{ matrix.target }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Setup Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross (for cross-compilation)
+        if: matrix.use_cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Install dependencies
+        run: pnpm install
+        working-directory: packages/native-renderer
+
+      - name: Build native module (cross)
+        if: matrix.use_cross
+        run: |
+          cross build --release --target ${{ matrix.target }}
+          cp target/${{ matrix.target }}/release/libpdf_renderer.so ${{ matrix.node_file }}
+        working-directory: packages/native-renderer
+
+      - name: Build native module (native)
+        if: ${{ !matrix.use_cross }}
+        run: pnpm build
+        working-directory: packages/native-renderer
+        env:
+          CARGO_BUILD_TARGET: ${{ matrix.target }}
+
+      - name: Rename output file
+        shell: bash
+        run: |
+          # Find the built .node file and rename it
+          if [ -f "pdf-renderer.node" ]; then
+            mv pdf-renderer.node ${{ matrix.node_file }}
+          fi
+        working-directory: packages/native-renderer
+
+      - name: Copy PDFium library
+        shell: bash
+        run: |
+          # PDFium library should be in OUT_DIR/pdfium/lib/
+          # We need to find and copy it
+          find target -name "${{ matrix.pdfium_lib }}" -type f 2>/dev/null | head -1 | xargs -I {} cp {} . || true
+        working-directory: packages/native-renderer
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.target }}
+          path: |
+            packages/native-renderer/${{ matrix.node_file }}
+            packages/native-renderer/${{ matrix.pdfium_lib }}
+          if-no-files-found: error
+
+  # 合并所有平台的构建产物
+  merge-artifacts:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Merge artifacts
+        run: |
+          mkdir -p packages/native-renderer/binaries
+          find artifacts -type f \( -name "*.node" -o -name "*.so" -o -name "*.dylib" -o -name "*.dll" \) -exec cp {} packages/native-renderer/binaries/ \;
+          ls -la packages/native-renderer/binaries/
+
+      - name: Upload merged artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: all-native-binaries
+          path: packages/native-renderer/binaries/

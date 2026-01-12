@@ -1,0 +1,139 @@
+# PDF2IMG 多平台构建和发布配置
+# 
+# 由于包含 native Rust 模块，需要在多个平台上构建
+# 然后合并产物后发布
+
+include:
+  # npm 发包模板
+  - https://git.woa.com/tencent-docs-epc/oci-template/blob/master/docs-npm-template.yml
+
+# 自定义多平台构建任务
+stages:
+  - build-native
+  - publish
+
+# ==================== 多平台 Native 构建 ====================
+
+# Linux x64 构建
+build-linux-x64:
+  stage: build-native
+  image: rust:1.75-bookworm
+  tags:
+    - linux
+    - amd64
+  script:
+    - apt-get update && apt-get install -y nodejs npm
+    - npm install -g pnpm
+    - cd packages/native-renderer
+    - pnpm install
+    - pnpm build
+    - ls -la *.node *.so 2>/dev/null || true
+  artifacts:
+    paths:
+      - packages/native-renderer/pdf-renderer.linux-x64-gnu.node
+      - packages/native-renderer/libpdfium.so
+    expire_in: 1 day
+  only:
+    - master
+    - main
+    - /^beta\/.*/
+
+# Linux arm64 构建
+build-linux-arm64:
+  stage: build-native
+  image: rust:1.75-bookworm
+  tags:
+    - linux
+    - arm64
+  script:
+    - apt-get update && apt-get install -y nodejs npm
+    - npm install -g pnpm
+    - cd packages/native-renderer
+    - pnpm install
+    - pnpm build
+    - ls -la *.node *.so 2>/dev/null || true
+  artifacts:
+    paths:
+      - packages/native-renderer/pdf-renderer.linux-arm64-gnu.node
+      - packages/native-renderer/libpdfium.so
+    expire_in: 1 day
+  only:
+    - master
+    - main
+    - /^beta\/.*/
+  allow_failure: true
+
+# macOS x64 构建
+build-macos-x64:
+  stage: build-native
+  tags:
+    - macos
+    - amd64
+  script:
+    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    - source $HOME/.cargo/env
+    - npm install -g pnpm
+    - cd packages/native-renderer
+    - pnpm install
+    - pnpm build
+    - ls -la *.node *.dylib 2>/dev/null || true
+  artifacts:
+    paths:
+      - packages/native-renderer/pdf-renderer.darwin-x64.node
+      - packages/native-renderer/libpdfium.dylib
+    expire_in: 1 day
+  only:
+    - master
+    - main
+    - /^beta\/.*/
+  allow_failure: true
+
+# macOS arm64 构建 (Apple Silicon)
+build-macos-arm64:
+  stage: build-native
+  tags:
+    - macos
+    - arm64
+  script:
+    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    - source $HOME/.cargo/env
+    - npm install -g pnpm
+    - cd packages/native-renderer
+    - pnpm install
+    - pnpm build
+    - ls -la *.node *.dylib 2>/dev/null || true
+  artifacts:
+    paths:
+      - packages/native-renderer/pdf-renderer.darwin-arm64.node
+      - packages/native-renderer/libpdfium.dylib
+    expire_in: 1 day
+  only:
+    - master
+    - main
+    - /^beta\/.*/
+  allow_failure: true
+
+# Windows x64 构建
+build-windows-x64:
+  stage: build-native
+  tags:
+    - windows
+    - amd64
+  script:
+    - choco install rust -y
+    - refreshenv
+    - npm install -g pnpm
+    - cd packages/native-renderer
+    - pnpm install
+    - pnpm build
+    - dir *.node *.dll 2>nul || echo "Files listed"
+  artifacts:
+    paths:
+      - packages/native-renderer/pdf-renderer.win32-x64-msvc.node
+      - packages/native-renderer/pdfium.dll
+    expire_in: 1 day
+  only:
+    - master
+    - main
+    - /^beta\/.*/
+  allow_failure: true

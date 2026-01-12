@@ -1,0 +1,53 @@
+{
+    "name": "@tencent/pdf2img-native",
+    "version": "1.0.0",
+    "description": "高性能 PDF 转图片渲染器，基于 PDFium 和 NAPI-RS",
+    "main": "index.js",
+    "types": "index.d.ts",
+    "napi": {
+        "name": "pdf-renderer",
+        "triples": {
+            "defaults": false,
+            "additional": [
+                "x86_64-unknown-linux-gnu",
+                "aarch64-unknown-linux-gnu",
+                "x86_64-apple-darwin",
+                "aarch64-apple-darwin",
+                "x86_64-pc-windows-msvc"
+            ]
+        }
+    },
+    "files": [
+        "index.js",
+        "index.d.ts",
+        "pdf-renderer.*.node",
+        "libpdfium.so",
+        "libpdfium.dylib",
+        "pdfium.dll"
+    ],
+    "scripts": {
+        "artifacts": "napi artifacts",
+        "build": "napi build --platform --release && node scripts/copy-pdfium.js",
+        "build:debug": "napi build --platform",
+        "prepublishOnly": "napi prepublish -t npm",
+        "test": "LD_LIBRARY_PATH=. node test.mjs",
+        "universal": "napi universal",
+        "version": "napi version"
+    },
+    "os": [
+        "linux",
+        "darwin",
+        "win32"
+    ],
+    "cpu": [
+        "x64",
+        "arm64"
+    ],
+    "devDependencies": {
+        "@napi-rs/cli": "^2.18.0"
+    },
+    "engines": {
+        "node": ">= 18"
+    },
+    "license": "MIT"
+}
