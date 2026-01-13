@@ -89,7 +89,7 @@ jobs:
       - name: Build native module
         working-directory: packages/native-renderer
         run: |
-          pnpm install
+          pnpm install --no-frozen-lockfile
           pnpm run build -- --target ${{ matrix.target }}
 
       - name: List built files
