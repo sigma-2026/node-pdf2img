@@ -35,7 +35,8 @@ if (!isPdfiumAvailable()) {
 }
 
 // 测试 PDF 文件路径
-const testPdfPath = join(__dirname, '../static/1M.pdf');
+// 相对于 monorepo 根目录
+const testPdfPath = join(__dirname, '../../static/1M.pdf');
 
 try {
     console.log('\nLoading test PDF:', testPdfPath);
