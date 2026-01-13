@@ -18,9 +18,80 @@ use renderer::{PdfRenderer, OutputFormat};
 use stream_reader::{BlockRequest, JsFileStreamer};
 
 /// 创建 PDFium 实例
+/// 
+/// 根据当前平台和架构加载对应的 PDFium 动态库
 fn create_pdfium() -> Result<pdfium_render::prelude::Pdfium> {
     use pdfium_render::prelude::*;
+    
+    // 获取当前模块所在目录
+    let module_dir = get_module_dir();
+    
+    // 根据平台和架构选择正确的库文件
+    let lib_name = get_pdfium_lib_name();
+    let lib_path = module_dir.join(lib_name);
+    
+    // 尝试从模块目录加载
+    if lib_path.exists() {
+        let bindings = Pdfium::bind_to_library(&lib_path)
+            .map_err(|e| Error::from_reason(format!("Failed to bind PDFium from {:?}: {}", lib_path, e)))?;
+        return Ok(Pdfium::new(bindings));
+    }
+    
+    // 尝试从当前工作目录加载
+    let cwd_lib_path = std::path::PathBuf::from(lib_name);
+    if cwd_lib_path.exists() {
+        let bindings = Pdfium::bind_to_library(&cwd_lib_path)
+            .map_err(|e| Error::from_reason(format!("Failed to bind PDFium from {:?}: {}", cwd_lib_path, e)))?;
+        return Ok(Pdfium::new(bindings));
+    }
+    
+    // 回退到默认搜索路径（系统路径）
     Ok(Pdfium::default())
+}
+
+/// 获取当前模块所在目录
+fn get_module_dir() -> std::path::PathBuf {
+    // 尝试从环境变量获取（CI 构建时设置）
+    if let Ok(path) = std::env::var("PDFIUM_MODULE_DIR") {
+        return std::path::PathBuf::from(path);
+    }
+    
+    // 获取当前可执行文件目录
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(parent) = exe_path.parent() {
+            return parent.to_path_buf();
+        }
+    }
+    
+    // 回退到当前目录
+    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+}
+
+/// 根据平台和架构获取 PDFium 库文件名
+fn get_pdfium_lib_name() -> &'static str {
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    return "libpdfium-linux-x64.so";
+    
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    return "libpdfium-linux-arm64.so";
+    
+    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+    return "libpdfium-darwin-x64.dylib";
+    
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    return "libpdfium-darwin-arm64.dylib";
+    
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    return "pdfium-win32-x64.dll";
+    
+    #[cfg(not(any(
+        all(target_os = "linux", target_arch = "x86_64"),
+        all(target_os = "linux", target_arch = "aarch64"),
+        all(target_os = "macos", target_arch = "x86_64"),
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(target_os = "windows", target_arch = "x86_64"),
+    )))]
+    return "libpdfium.so"; // fallback
 }
 
 /// 单页渲染结果

@@ -2,7 +2,7 @@
   "name": "node-pdf2img-native",
   "version": "1.0.0",
   "description": "High-performance PDF to image native renderer using PDFium and NAPI-RS",
-  "main": "index.js",
+  "main": "lib.js",
   "types": "index.d.ts",
   "napi": {
     "name": "pdf-renderer",
@@ -19,12 +19,15 @@
     "binaryName": "pdf-renderer"
   },
   "files": [
+    "lib.js",
     "index.js",
     "index.d.ts",
     "pdf-renderer.*.node",
-    "libpdfium.so",
-    "libpdfium.dylib",
-    "pdfium.dll"
+    "libpdfium-linux-x64.so",
+    "libpdfium-linux-arm64.so",
+    "libpdfium-darwin-x64.dylib",
+    "libpdfium-darwin-arm64.dylib",
+    "pdfium-win32-x64.dll"
   ],
     "scripts": {
         "artifacts": "napi artifacts",

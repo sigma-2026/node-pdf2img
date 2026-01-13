@@ -107,9 +107,9 @@ jobs:
           echo "=== Built files ==="
           shopt -s nullglob
           ls -la *.node 2>&1 || echo "No .node files"
-          ls -la *.so 2>&1 || echo "No .so files"
-          ls -la *.dylib 2>&1 || echo "No .dylib files"
-          ls -la *.dll 2>&1 || echo "No .dll files"
+          ls -la libpdfium-*.so 2>&1 || echo "No .so files"
+          ls -la libpdfium-*.dylib 2>&1 || echo "No .dylib files"
+          ls -la pdfium-*.dll 2>&1 || echo "No .dll files"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -117,7 +117,9 @@ jobs:
           name: native-${{ matrix.platform }}
           path: |
             packages/native-renderer/*.node
-            packages/native-renderer/libpdfium.*
+            packages/native-renderer/libpdfium-*.so
+            packages/native-renderer/libpdfium-*.dylib
+            packages/native-renderer/pdfium-*.dll
           if-no-files-found: error
 
 
