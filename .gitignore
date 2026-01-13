@@ -4,6 +4,7 @@ packages/*/node_modules/
 
 # 构建产物
 *.node
+!packages/native-renderer/*.node
 target/
 packages/*/target/
 
