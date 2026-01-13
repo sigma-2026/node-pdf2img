@@ -15,7 +15,8 @@
         "aarch64-apple-darwin",
         "x86_64-pc-windows-msvc"
       ]
-    }
+    },
+    "binaryName": "pdf-renderer"
   },
   "files": [
     "index.js",
@@ -29,6 +30,8 @@
         "artifacts": "napi artifacts",
         "build": "napi build --platform --release && node scripts/copy-pdfium.js",
         "build:debug": "napi build --platform",
+        "install": "napi build --platform --release || echo 'Build skipped, using prebuilt binary'",
+        "prebuildify": "napi prebuildify",
         "test": "LD_LIBRARY_PATH=. node test.mjs",
         "universal": "napi universal",
         "version": "napi version"
@@ -50,15 +53,8 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/your-username/node-pdf2img.git",
+    "url": "git+https://github.com/sigma-2026/node-pdf2img.git",
     "directory": "packages/native-renderer"
   },
-  "license": "MIT",
-  "optionalDependencies": {
-    "node-pdf2img-native-linux-x64-gnu": "1.0.0",
-    "node-pdf2img-native-linux-arm64-gnu": "1.0.0",
-    "node-pdf2img-native-darwin-x64": "1.0.0",
-    "node-pdf2img-native-darwin-arm64": "1.0.0",
-    "node-pdf2img-native-win32-x64-msvc": "1.0.0"
-  }
+  "license": "MIT"
 }

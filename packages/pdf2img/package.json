@@ -54,9 +54,7 @@
         "ora": "^8.0.0",
         "p-limit": "^7.2.0",
         "piscina": "^5.1.4",
-        "sharp": "^0.33.0"
-    },
-    "optionalDependencies": {
+        "sharp": "^0.33.0",
         "node-pdf2img-native": "file:../native-renderer"
     },
     "devDependencies": {
@@ -64,10 +62,10 @@
     },
     "repository": {
         "type": "git",
-        "url": "git+https://github.com/your-username/node-pdf2img.git"
+        "url": "git+https://github.com/sigma-2026/node-pdf2img.git"
     },
     "bugs": {
-        "url": "https://github.com/your-username/node-pdf2img/issues"
+        "url": "https://github.com/sigma-2026/node-pdf2img/issues"
     },
-    "homepage": "https://github.com/your-username/node-pdf2img#readme"
+    "homepage": "https://github.com/sigma-2026/node-pdf2img#readme"
 }
