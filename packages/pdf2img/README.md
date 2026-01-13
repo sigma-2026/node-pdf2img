@@ -28,6 +28,8 @@ npm install node-pdf2img
 npm install -g node-pdf2img
 ```
 
+> 💡 **本地开发**: 如果你想直接使用预编译的 native 模块进行本地开发，请查看 [LOCAL_DEV.md](../../LOCAL_DEV.md) 了解更多。
+
 ## CLI 使用
 
 ```bash
