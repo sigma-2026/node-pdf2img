@@ -13,6 +13,13 @@ on:
     branches:
       - master
       - main
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish to npm'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   build-native:
@@ -80,22 +87,22 @@ jobs:
         working-directory: packages/native-renderer
         run: |
           pnpm install
-          pnpm napi build --platform --release --target ${{ matrix.target }}
+          pnpm run build -- --target ${{ matrix.target }}
 
-      - name: Copy PDFium library
+      - name: List built files
         working-directory: packages/native-renderer
-        run: node scripts/copy-pdfium.js
-        continue-on-error: true
+        run: |
+          echo "=== Built files ==="
+          ls -la *.node 2>/dev/null || true
+          ls -la *.so 2>/dev/null || true
+          ls -la *.dylib 2>/dev/null || true
+          ls -la *.dll 2>/dev/null || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: native-${{ matrix.platform }}
-          path: |
-            packages/native-renderer/*.node
-            packages/native-renderer/libpdfium.so
-            packages/native-renderer/libpdfium.dylib
-            packages/native-renderer/pdfium.dll
+          path: packages/native-renderer/*
           if-no-files-found: error
 
   # 合并所有平台产物并发布
@@ -103,7 +110,13 @@ jobs:
     name: Release
     needs: build-native
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/beta/') || github.ref == 'refs/heads/next'
+    if: |
+      github.event_name == 'workflow_dispatch' && github.event.inputs.publish == 'true' ||
+      github.ref == 'refs/heads/master' || 
+      github.ref == 'refs/heads/main' || 
+      startsWith(github.ref, 'refs/tags/v') || 
+      startsWith(github.ref, 'refs/heads/beta/') || 
+      github.ref == 'refs/heads/next'
     
     steps:
       - name: Checkout

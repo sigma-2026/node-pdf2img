@@ -1,0 +1,27 @@
+# 忽略所有
+*
+
+# 包含需要的文件
+!src/**
+!bin/**
+!*.json
+!*.md
+!*.js
+!*.d.ts
+
+# native 模块
+!*.node
+!libpdfium.so
+!libpdfium.dylib
+!pdfium.dll
+
+# 忽略测试和开发文件
+**/*.test.js
+**/*.spec.js
+.DS_Store
+.git
+.gitignore
+.nyc_output
+coverage
+node_modules
+*.log
