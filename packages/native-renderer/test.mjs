@@ -2,8 +2,8 @@
  * PDF Renderer 测试脚本
  */
 
-import { readFileSync } from 'fs';
-import { join, dirname } from 'path';
+import { readFileSync, existsSync } from 'fs';
+import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -34,9 +34,44 @@ if (!isPdfiumAvailable()) {
     process.exit(1);
 }
 
-// 测试 PDF 文件路径
-// 相对于 monorepo 根目录
-const testPdfPath = join(__dirname, '../../static/1M.pdf');
+// 查找 static 目录和测试 PDF
+function findTestPdf() {
+    // 从当前目录开始向上查找 static 目录
+    let currentDir = __dirname;
+    const maxLevels = 5; // 最多向上查找 5 层
+    
+    for (let i = 0; i < maxLevels; i++) {
+        const staticDir = join(currentDir, 'static');
+        const testPdf = join(staticDir, '1M.pdf');
+        
+        console.log(`Checking: ${staticDir}`);
+        if (existsSync(testPdf)) {
+            console.log(`Found test PDF: ${testPdf}`);
+            return testPdf;
+        }
+        
+        const parentDir = dirname(currentDir);
+        if (parentDir === currentDir) {
+            break; // 已到根目录
+        }
+        currentDir = parentDir;
+    }
+    
+    // 如果找不到，使用绝对路径
+    const fallbackPath = resolve(__dirname, '../../../static/1M.pdf');
+    console.log(`Trying fallback path: ${fallbackPath}`);
+    return fallbackPath;
+}
+
+const testPdfPath = findTestPdf();
+
+if (!existsSync(testPdfPath)) {
+    console.error('\nTest PDF not found!');
+    console.log('Searched path:', testPdfPath);
+    console.log('Current working directory:', process.cwd());
+    console.log('Test script directory:', __dirname);
+    process.exit(1);
+}
 
 try {
     console.log('\nLoading test PDF:', testPdfPath);
