@@ -1,58 +1,64 @@
 {
-    "name": "node-pdf2img-native",
-    "version": "1.0.0",
-    "description": "High-performance PDF to image native renderer using PDFium and NAPI-RS",
-    "main": "index.js",
-    "types": "index.d.ts",
-    "napi": {
-        "name": "pdf-renderer",
-        "triples": {
-            "defaults": false,
-            "additional": [
-                "x86_64-unknown-linux-gnu",
-                "aarch64-unknown-linux-gnu",
-                "x86_64-apple-darwin",
-                "aarch64-apple-darwin",
-                "x86_64-pc-windows-msvc"
-            ]
-        }
-    },
-    "files": [
-        "index.js",
-        "index.d.ts",
-        "pdf-renderer.*.node",
-        "libpdfium.so",
-        "libpdfium.dylib",
-        "pdfium.dll"
-    ],
+  "name": "node-pdf2img-native",
+  "version": "1.0.0",
+  "description": "High-performance PDF to image native renderer using PDFium and NAPI-RS",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "napi": {
+    "name": "pdf-renderer",
+    "triples": {
+      "defaults": false,
+      "additional": [
+        "x86_64-unknown-linux-gnu",
+        "aarch64-unknown-linux-gnu",
+        "x86_64-apple-darwin",
+        "aarch64-apple-darwin",
+        "x86_64-pc-windows-msvc"
+      ]
+    }
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "pdf-renderer.*.node",
+    "libpdfium.so",
+    "libpdfium.dylib",
+    "pdfium.dll"
+  ],
     "scripts": {
         "artifacts": "napi artifacts",
         "build": "napi build --platform --release && node scripts/copy-pdfium.js",
         "build:debug": "napi build --platform",
-        "prepublishOnly": "napi prepublish -t npm",
         "test": "LD_LIBRARY_PATH=. node test.mjs",
         "universal": "napi universal",
         "version": "napi version"
     },
-    "os": [
-        "linux",
-        "darwin",
-        "win32"
-    ],
-    "cpu": [
-        "x64",
-        "arm64"
-    ],
-    "devDependencies": {
-        "@napi-rs/cli": "^2.18.0"
-    },
-    "engines": {
-        "node": ">= 18"
-    },
-    "repository": {
-        "type": "git",
-        "url": "git+https://github.com/your-username/node-pdf2img.git",
-        "directory": "packages/native-renderer"
-    },
-    "license": "MIT"
+  "os": [
+    "linux",
+    "darwin",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "devDependencies": {
+    "@napi-rs/cli": "^2.18.0"
+  },
+  "engines": {
+    "node": ">= 18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/your-username/node-pdf2img.git",
+    "directory": "packages/native-renderer"
+  },
+  "license": "MIT",
+  "optionalDependencies": {
+    "node-pdf2img-native-linux-x64-gnu": "1.0.0",
+    "node-pdf2img-native-linux-arm64-gnu": "1.0.0",
+    "node-pdf2img-native-darwin-x64": "1.0.0",
+    "node-pdf2img-native-darwin-arm64": "1.0.0",
+    "node-pdf2img-native-win32-x64-msvc": "1.0.0"
+  }
 }

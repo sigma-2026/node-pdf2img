@@ -16,9 +16,6 @@ importers:
 
   packages/pdf2img:
     dependencies:
-      '@tencent/pdf2img-native':
-        specifier: workspace:*
-        version: link:../native-renderer
       commander:
         specifier: ^12.0.0
         version: 12.1.0
@@ -28,6 +25,9 @@ importers:
       dotenv:
         specifier: ^16.0.3
         version: 16.6.1
+      node-pdf2img-native:
+        specifier: file:../native-renderer
+        version: file:packages/native-renderer
       ora:
         specifier: ^8.0.0
         version: 8.2.0
@@ -1120,4 +1120,12 @@ packages:
   /yocto-queue@1.2.2:
     resolution: {integrity: sha512-4LCcse/U2MHZ63HAJVE+v71o7yOdIe4cZ70Wpf8D/IyjDKYQLV5GD46B+hSTjJsvV5PztjvHoU580EftxjDZFQ==}
     engines: {node: '>=12.20'}
+    dev: false
+
+  file:packages/native-renderer:
+    resolution: {directory: packages/native-renderer, type: directory}
+    name: node-pdf2img-native
+    engines: {node: '>= 18'}
+    cpu: [x64, arm64]
+    os: [linux, darwin, win32]
     dev: false
