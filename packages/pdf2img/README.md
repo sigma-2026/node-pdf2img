@@ -3,7 +3,7 @@
 High-performance PDF to image converter using PDFium native renderer + Sharp image encoding.
 
 [![npm version](https://badge.fury.io/js/node-pdf2img.svg)](https://badge.fury.io/js/node-pdf2img)
-[![Build Status](https://github.com/your-username/node-pdf2img/workflows/Build%20and%20Release/badge.svg)](https://github.com/your-username/node-pdf2img/actions)
+[![Build Status](https://github.com/sigma-2026/node-pdf2img/workflows/Build%20and%20Release/badge.svg)](https://github.com/sigma-2026/node-pdf2img/actions)
 
 ## 特性
 
@@ -106,7 +106,7 @@ pdf2img document.pdf --cos \
 ### 基本用法
 
 ```javascript
-import { convert, getPageCount, isAvailable } from '@tencent/pdf2img';
+import { convert, getPageCount, isAvailable } from 'node-pdf2img';
 
 // 检查渲染器是否可用
 if (!isAvailable()) {
@@ -225,14 +225,14 @@ const pageCount = await getPageCount('./document.pdf');
 console.log(`PDF 共 ${pageCount} 页`);
 
 // 同步版本（已废弃，保持向后兼容）
-import { getPageCountSync } from '@tencent/pdf2img';
+import { getPageCountSync } from 'node-pdf2img';
 const pageCount = getPageCountSync('./document.pdf');
 ```
 
 ### 线程池管理
 
 ```javascript
-import { getThreadPoolStats, destroyThreadPool } from '@tencent/pdf2img';
+import { getThreadPoolStats, destroyThreadPool } from 'node-pdf2img';
 
 // 获取线程池统计信息
 const stats = getThreadPoolStats();
@@ -411,89 +411,107 @@ PDF 转图片。
   - macOS arm64 (Apple Silicon)
   - Windows x64
 
-PDFium 库已随包一起分发，无需额外安装。
+### 原生模块安装
+
+`node-pdf2img` 依赖 `node-pdf2img-native` 原生模块。安装时会自动：
+1. **优先**下载对应平台的预编译二进制文件
+2. **降级**如果预编译文件不可用，则在本地编译（需要 Rust + C++ 编译工具链）
+
+大多数情况下会使用预编译版本，安装快速。如果需要本地编译，请确保已安装：
+- Rust 工具链
+- C++ 编译器（GCC/Clang/MSVC）
+- Make（Linux/macOS）或 Ninja（Windows）
 
 ## 多平台构建说明
 
-本项目使用 Rust + NAPI-RS 构建原生模块，支持以下平台：
+本项目使用 Rust + NAPI-RS 构建原生模块，通过 GitHub Actions 自动构建和发布所有平台版本。
+
+### 支持的平台
 
 | 平台 | 架构 | 构建状态 |
 |------|------|----------|
-| Linux | x64 | ✅ Orange CI |
-| Linux | arm64 | ⚠️ OCI 交叉编译 |
-| macOS | x64 | ⚠️ 需要手动构建 |
-| macOS | arm64 | ⚠️ 需要手动构建 |
-| Windows | x64 | ⚠️ 需要手动构建 |
+| Linux | x64 | ✅ GitHub Actions |
+| Linux | arm64 | ✅ GitHub Actions (交叉编译) |
+| macOS | x64 | ✅ GitHub Actions |
+| macOS | arm64 | ✅ GitHub Actions |
+| Windows | x64 | ✅ GitHub Actions |
 
-### 构建流程
+### 自动构建流程
 
-#### 1. Linux 平台（OCI 自动构建）
+推送到以下分支会自动触发 GitHub Actions 构建：
+- `master` / `main`: 正式版本，发布到 latest 标签
+- `beta/*`: 测试版本，发布到 beta 标签
+- `next`: 大版本预览，发布到 next 标签
+- 标签 `v*`: 正式发布版本
 
-推送到以下分支会自动触发 Orange CI 构建：
-- `master` / `main`: 正式版本
-- `beta/*`: 测试版本
-- `next`: 大版本预览
+GitHub Actions 会：
+1. 为所有 5 个平台交叉编译原生模块
+2. 将编译产物合并到 `node-pdf2img-native` 包
+3. 发布两个 npm 包：
+   - `node-pdf2img-native`: 原生渲染器包
+   - `node-pdf2img`: 主包
 
-OCI 会构建 Linux x64 和 arm64 版本。
+### 手动构建（开发调试）
 
-#### 2. macOS / Windows 平台（手动构建）
+如需在本地构建特定平台的原生模块：
 
-由于 Orange CI 没有 macOS/Windows 构建机，需要手动构建：
+**Linux x64**:
+```bash
+cd packages/native-renderer
+pnpm install
+pnpm run build
+# 产物：pdf-renderer.linux-x64-gnu.node, libpdfium.so
+```
 
 **macOS x64 (Intel)**:
 ```bash
 cd packages/native-renderer
-npm install
-npm run build
+pnpm install
+pnpm run build
 # 产物：pdf-renderer.darwin-x64.node, libpdfium.dylib
 ```
 
 **macOS arm64 (Apple Silicon)**:
 ```bash
 cd packages/native-renderer
-npm install
-npm run build
+pnpm install
+pnpm run build
 # 产物：pdf-renderer.darwin-arm64.node, libpdfium.dylib
 ```
 
 **Windows x64**:
 ```powershell
 cd packages\native-renderer
-npm install
-npm run build
+pnpm install
+pnpm run build
 # 产物：pdf-renderer.win32-x64-msvc.node, pdfium.dll
 ```
 
-#### 3. 合并所有平台产物
-
-将各平台构建产物放入 `packages/native-renderer/` 目录：
+### 项目结构
 
 ```
-packages/native-renderer/
-├── index.js
-├── index.d.ts
-├── package.json
-├── pdf-renderer.linux-x64-gnu.node      # Linux x64
-├── pdf-renderer.linux-arm64-gnu.node    # Linux arm64
-├── pdf-renderer.darwin-x64.node         # macOS x64
-├── pdf-renderer.darwin-arm64.node       # macOS arm64
-├── pdf-renderer.win32-x64-msvc.node     # Windows x64
-├── libpdfium.so                         # Linux PDFium
-├── libpdfium.dylib                      # macOS PDFium
-└── pdfium.dll                           # Windows PDFium
+pdf2img/
+├── packages/
+│   ├── pdf2img/              # 主包
+│   │   ├── src/
+│   │   ├── bin/
+│   │   └── package.json
+│   └── native-renderer/      # 原生渲染器包
+│       ├── src/              # Rust 源代码
+│       ├── index.js          # JavaScript 绑定
+│       ├── package.json
+│       └── Cargo.toml
+├── .github/workflows/
+│   └── build-and-release.yml # CI/CD 配置
+└── pnpm-workspace.yaml
 ```
 
-#### 4. 发布包
+### 发布流程
 
-提交并推送代码到发布分支：
-
-```bash
-git add packages/native-renderer/
-git commit -m "feat: update native modules for all platforms"
-git push origin master  # 或 beta/* 分支
-```
-
-Orange CI 会自动发布 npm 包。
+1. **开发分支提交**: 推送到 `beta/*` 或 `next` 分支
+2. **自动构建**: GitHub Actions 为所有平台编译
+3. **自动发布**: 发布到 npm 对应的 tag（beta/next）
+4. **正式发布**: 合并到 `master` 或打 tag `v*`，发布到 latest
 
 ## 许可证
 
