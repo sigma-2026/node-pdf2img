@@ -58,7 +58,7 @@ function mergeConfig(options = {}) {
 
 /**
  * 使用 Sharp 编码原始位图
- * 
+ *
  * @param {Buffer} rawBitmap - 原始 RGBA 像素数据
  * @param {number} width - 图像宽度
  * @param {number} height - 图像高度
@@ -75,85 +75,58 @@ async function encodeWithSharp(rawBitmap, width, height, format, options = {}) {
         }
     });
 
+    let buffer;
+
     if (format === 'webp') {
-        const buffer = await sharpInstance.webp({
+        buffer = await sharpInstance.webp({
             quality: options.webpQuality || options.quality || 80,
             effort: options.webpMethod ?? 4,
         }).toBuffer();
-
-        // 调试：检查 buffer 类型
-        console.error(`[Worker] WebP buffer type: ${typeof buffer}, isBuffer: ${Buffer.isBuffer(buffer)}, constructor: ${buffer?.constructor?.name}`);
-
-        // 处理可能的非标准 Buffer 对象
-        if (Buffer.isBuffer(buffer)) {
-            return buffer;
-        }
-
-        // 如果是 Uint8Array 或类似对象
-        if (buffer && typeof buffer === 'object') {
-            if (buffer.buffer && buffer.byteLength !== undefined) {
-                // 可能是 TypedArray
-                return Buffer.from(buffer);
-            }
-            if (Array.isArray(buffer)) {
-                return Buffer.from(buffer);
-            }
-        }
-
-        throw new Error(`WebP encoding failed: invalid buffer type ${typeof buffer}`);
     } else if (format === 'png') {
-        const buffer = await sharpInstance.png({
+        buffer = await sharpInstance.png({
             compressionLevel: options.pngCompression ?? 6,
             adaptiveFiltering: true,
         }).toBuffer();
-
-        // 调试：检查 buffer 类型
-        console.error(`[Worker] PNG buffer type: ${typeof buffer}, isBuffer: ${Buffer.isBuffer(buffer)}, constructor: ${buffer?.constructor?.name}`);
-
-        // 处理可能的非标准 Buffer 对象
-        if (Buffer.isBuffer(buffer)) {
-            return buffer;
-        }
-
-        if (buffer && typeof buffer === 'object') {
-            if (buffer.buffer && buffer.byteLength !== undefined) {
-                return Buffer.from(buffer);
-            }
-            if (Array.isArray(buffer)) {
-                return Buffer.from(buffer);
-            }
-        }
-
-        throw new Error(`PNG encoding failed: invalid buffer type ${typeof buffer}`);
     } else if (format === 'jpeg' || format === 'jpg') {
         // 移除 alpha 通道，与白色背景混合
         sharpInstance = sharpInstance.flatten({ background: { r: 255, g: 255, b: 255 } });
-        const buffer = await sharpInstance.jpeg({
+        buffer = await sharpInstance.jpeg({
             quality: options.jpegQuality || options.quality || 85,
             mozjpeg: true,
         }).toBuffer();
-
-        // 调试：检查 buffer 类型
-        console.error(`[Worker] JPEG buffer type: ${typeof buffer}, isBuffer: ${Buffer.isBuffer(buffer)}, constructor: ${buffer?.constructor?.name}`);
-
-        // 处理可能的非标准 Buffer 对象
-        if (Buffer.isBuffer(buffer)) {
-            return buffer;
-        }
-
-        if (buffer && typeof buffer === 'object') {
-            if (buffer.buffer && buffer.byteLength !== undefined) {
-                return Buffer.from(buffer);
-            }
-            if (Array.isArray(buffer)) {
-                return Buffer.from(buffer);
-            }
-        }
-
-        throw new Error(`JPEG encoding failed: invalid buffer type ${typeof buffer}`);
+    } else {
+        throw new Error(`Unsupported format: ${format}`);
     }
-    
-    throw new Error(`Unsupported format: ${format}`);
+
+    // 确保返回的是 Buffer
+    // Sharp 的 toBuffer() 可能返回 Uint8Array 或其他类型
+    if (!buffer || buffer.length === 0) {
+        throw new Error(`${format} encoding failed: empty buffer`);
+    }
+
+    // 如果不是 Buffer，尝试转换
+    if (!Buffer.isBuffer(buffer)) {
+        console.error(`[Worker] ${format} buffer type: ${typeof buffer}, constructor: ${buffer?.constructor?.name}`);
+        console.error(`[Worker] Converting to Buffer from type: ${typeof buffer}`);
+
+        if (buffer.buffer && typeof buffer.buffer === 'object') {
+            // Uint8Array 或 TypedArray
+            return Buffer.from(buffer);
+        }
+
+        if (Array.isArray(buffer)) {
+            return Buffer.from(buffer);
+        }
+
+        // 最后的手段：直接尝试 from
+        try {
+            return Buffer.from(buffer);
+        } catch (e) {
+            throw new Error(`${format} encoding failed: cannot convert buffer to Buffer. Type: ${typeof buffer}`);
+        }
+    }
+
+    return buffer;
 }
 
 /**

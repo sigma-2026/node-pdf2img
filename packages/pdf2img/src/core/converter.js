@@ -454,17 +454,38 @@ export async function convert(input, options = {}) {
             }
 
             // 确保 buffer 是 Buffer 类型
+            // Piscina 跨线程传递时 Buffer 可能被序列化为普通对象
             let buffer = page.buffer;
             if (!Buffer.isBuffer(buffer)) {
-                logger.error(`Buffer type mismatch: ${typeof buffer}, expected Buffer`);
-                return {
-                    pageNum: page.pageNum,
-                    width: page.width,
-                    height: page.height,
-                    success: false,
-                    buffer: null,
-                    error: 'Invalid buffer type returned from worker',
-                };
+                // 尝试从序列化的对象恢复 Buffer
+                try {
+                    if (buffer && typeof buffer === 'object') {
+                        // 可能是 { type: 'Buffer', data: [...] } 格式
+                        if (buffer.type === 'Buffer' && Array.isArray(buffer.data)) {
+                            buffer = Buffer.from(buffer.data);
+                        } else if (buffer.data && ArrayBuffer.isView(buffer.data)) {
+                            buffer = Buffer.from(buffer.data);
+                        } else if (ArrayBuffer.isView(buffer)) {
+                            // Uint8Array 等 TypedArray
+                            buffer = Buffer.from(buffer);
+                        } else {
+                            // 最后尝试直接转换
+                            buffer = Buffer.from(buffer);
+                        }
+                    } else {
+                        throw new Error(`Cannot convert ${typeof buffer} to Buffer`);
+                    }
+                } catch (e) {
+                    logger.error(`Buffer type mismatch: ${typeof page.buffer}, conversion failed: ${e.message}`);
+                    return {
+                        pageNum: page.pageNum,
+                        width: page.width,
+                        height: page.height,
+                        success: false,
+                        buffer: null,
+                        error: `Invalid buffer type returned from worker: ${e.message}`,
+                    };
+                }
             }
 
             return {
