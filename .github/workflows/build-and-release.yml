@@ -95,13 +95,15 @@ jobs:
           pnpm run build -- --target ${{ matrix.target }}
 
       - name: List built files
+        shell: bash
         working-directory: packages/native-renderer
         run: |
           echo "=== Built files ==="
-          ls -la *.node 2>/dev/null || true
-          ls -la *.so 2>/dev/null || true
-          ls -la *.dylib 2>/dev/null || true
-          ls -la *.dll 2>/dev/null || true
+          shopt -s nullglob
+          ls -la *.node 2>&1 || echo "No .node files"
+          ls -la *.so 2>&1 || echo "No .so files"
+          ls -la *.dylib 2>&1 || echo "No .dylib files"
+          ls -la *.dll 2>&1 || echo "No .dll files"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
