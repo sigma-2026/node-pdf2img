@@ -80,19 +80,19 @@ async function encodeWithSharp(rawBitmap, width, height, format, options = {}) {
     if (format === 'webp') {
         buffer = await sharpInstance.webp({
             quality: options.webpQuality || options.quality || 80,
-            effort: options.webpMethod ?? 4,
+            effort: options.webpMethod ?? (options.fast ? 0 : 4),
         }).toBuffer();
     } else if (format === 'png') {
         buffer = await sharpInstance.png({
-            compressionLevel: options.pngCompression ?? 6,
-            adaptiveFiltering: true,
+            compressionLevel: options.pngCompression ?? (options.fast ? 1 : 6),
+            adaptiveFiltering: !options.fast,
         }).toBuffer();
     } else if (format === 'jpeg' || format === 'jpg') {
         // 移除 alpha 通道，与白色背景混合
         sharpInstance = sharpInstance.flatten({ background: { r: 255, g: 255, b: 255 } });
         buffer = await sharpInstance.jpeg({
             quality: options.jpegQuality || options.quality || 85,
-            mozjpeg: true,
+            mozjpeg: !options.fast,
         }).toBuffer();
     } else {
         throw new Error(`Unsupported format: ${format}`);

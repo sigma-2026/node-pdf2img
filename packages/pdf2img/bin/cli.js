@@ -59,6 +59,7 @@ program
     .option('-w, --width <width>', '目标渲染宽度（像素）', '1920')
     .option('-q, --quality <quality>', '图片质量（0-100，用于 webp/jpg）', '100')
     .option('-f, --format <format>', '输出格式：webp, png, jpg', 'webp')
+    .option('--fast', '快速模式（牺牲压缩率换取速度）')
     .option('--prefix <prefix>', '输出文件名前缀', 'page')
     .option('--info', '仅显示 PDF 信息（页数）')
     .option('--version-info', '显示原生渲染器版本')
@@ -143,6 +144,7 @@ program
             targetWidth: parseInt(options.width, 10),
             quality: parseInt(options.quality, 10),
             format: format,
+            fast: options.fast || false,
         };
 
         // COS 模式
