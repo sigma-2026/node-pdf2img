@@ -1,8 +1,8 @@
 {
-    "name": "pdf2img-monorepo",
+    "name": "node-pdf2img-monorepo",
     "version": "1.0.0",
     "private": true,
-    "description": "PDF 转图片工具 monorepo",
+    "description": "PDF to image converter monorepo",
     "type": "module",
     "scripts": {
         "build": "pnpm -r build",
@@ -10,8 +10,8 @@
         "test:cli": "node packages/pdf2img/bin/cli.js",
         "benchmark": "node test/file-benchmark.mjs",
         "benchmark:stream": "node test/stream-benchmark.mjs",
-        "publish:pdf2img": "cd packages/pdf2img && npm publish --no-git-checks",
-        "publish:pdf2img:dry": "cd packages/pdf2img && npm publish --dry-run --no-git-checks",
+        "publish:pdf2img": "cd packages/pdf2img && npm publish",
+        "publish:pdf2img:dry": "cd packages/pdf2img && npm publish --dry-run",
         "clean": "rm -rf packages/*/node_modules node_modules"
     },
     "engines": {

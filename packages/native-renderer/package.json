@@ -1,7 +1,7 @@
 {
-    "name": "@tencent/pdf2img-native",
+    "name": "node-pdf2img-native",
     "version": "1.0.0",
-    "description": "高性能 PDF 转图片渲染器，基于 PDFium 和 NAPI-RS",
+    "description": "High-performance PDF to image native renderer using PDFium and NAPI-RS",
     "main": "index.js",
     "types": "index.d.ts",
     "napi": {
@@ -48,6 +48,11 @@
     },
     "engines": {
         "node": ">= 18"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/your-username/node-pdf2img.git",
+        "directory": "packages/native-renderer"
     },
     "license": "MIT"
 }

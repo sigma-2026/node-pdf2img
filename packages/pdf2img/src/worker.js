@@ -26,7 +26,7 @@ async function initNativeRenderer() {
     
     initPromise = (async () => {
         try {
-            nativeRenderer = await import('@tencent/pdf2img-native');
+            nativeRenderer = await import('node-pdf2img-native');
             
             if (nativeRenderer.isPdfiumAvailable()) {
                 nativeAvailable = true;

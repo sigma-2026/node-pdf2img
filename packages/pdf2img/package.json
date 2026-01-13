@@ -1,7 +1,7 @@
 {
-    "name": "@tencent/pdf2img",
+    "name": "node-pdf2img",
     "version": "0.1.0",
-    "description": "高性能 PDF 转图片工具，基于 PDFium 原生渲染器",
+    "description": "High-performance PDF to image converter using PDFium native renderer",
     "type": "module",
     "main": "./src/index.js",
     "types": "./src/index.d.ts",
@@ -18,14 +18,11 @@
         "src",
         "bin"
     ],
-    "publishConfig": {
-        "registry": "https://mirrors.tencent.com/npm/"
-    },
     "scripts": {
         "test": "node --test test/*.test.js",
         "test:run": "node test/api.test.js",
-        "oci-release": "echo 'Build completed'",
-        "oci-check": "node -e \"require('./src/index.js')\" || true"
+        "build:native": "cd ../native-renderer && npm run build",
+        "prepublishOnly": "npm run test"
     },
     "keywords": [
         "pdf",
@@ -51,7 +48,7 @@
         "arm64"
     ],
     "dependencies": {
-        "@tencent/pdf2img-native": "workspace:*",
+        "node-pdf2img-native": "file:../native-renderer",
         "commander": "^12.0.0",
         "cos-nodejs-sdk-v5": "^2.14.6",
         "dotenv": "^16.0.3",
@@ -64,6 +61,14 @@
         "@types/node": "^20.0.0"
     },
     "bundleDependencies": [
-        "@tencent/pdf2img-native"
-    ]
+        "node-pdf2img-native"
+    ],
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/your-username/node-pdf2img.git"
+    },
+    "bugs": {
+        "url": "https://github.com/your-username/node-pdf2img/issues"
+    },
+    "homepage": "https://github.com/your-username/node-pdf2img#readme"
 }

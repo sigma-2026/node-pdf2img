@@ -18,7 +18,7 @@ let nativeAvailable = false;
 
 try {
     // 从 workspace 的 native-renderer 包导入
-    nativeRenderer = await import('@tencent/pdf2img-native');
+    nativeRenderer = await import('node-pdf2img-native');
 
     if (nativeRenderer.isPdfiumAvailable()) {
         nativeAvailable = true;
