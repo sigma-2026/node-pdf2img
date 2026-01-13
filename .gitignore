@@ -1,5 +1,6 @@
 # 依赖
 node_modules/
+native-renderer
 
 # 构建产物
 *.node
