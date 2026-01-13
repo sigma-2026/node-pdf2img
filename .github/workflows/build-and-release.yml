@@ -200,10 +200,10 @@ jobs:
             # Next release - use prerelease
             npm version prerelease --preid=next -m "chore: release %s"
           else
-            # Release from master/main - use patch version
-            npm version patch -m "chore: release %s"
+            # Release from master/main - use minor version (to avoid conflicts)
+            npm version minor -m "chore: release %s"
           fi
-          
+
           echo "New version: $(node -p 'require(\"./package.json\").version')"
 
       - name: Publish native renderer package
