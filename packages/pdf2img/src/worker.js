@@ -80,13 +80,51 @@ async function encodeWithSharp(rawBitmap, width, height, format, options = {}) {
             quality: options.webpQuality || options.quality || 80,
             effort: options.webpMethod ?? 4,
         }).toBuffer();
-        return Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
+
+        // 调试：检查 buffer 类型
+        console.error(`[Worker] WebP buffer type: ${typeof buffer}, isBuffer: ${Buffer.isBuffer(buffer)}, constructor: ${buffer?.constructor?.name}`);
+
+        // 处理可能的非标准 Buffer 对象
+        if (Buffer.isBuffer(buffer)) {
+            return buffer;
+        }
+
+        // 如果是 Uint8Array 或类似对象
+        if (buffer && typeof buffer === 'object') {
+            if (buffer.buffer && buffer.byteLength !== undefined) {
+                // 可能是 TypedArray
+                return Buffer.from(buffer);
+            }
+            if (Array.isArray(buffer)) {
+                return Buffer.from(buffer);
+            }
+        }
+
+        throw new Error(`WebP encoding failed: invalid buffer type ${typeof buffer}`);
     } else if (format === 'png') {
         const buffer = await sharpInstance.png({
             compressionLevel: options.pngCompression ?? 6,
             adaptiveFiltering: true,
         }).toBuffer();
-        return Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
+
+        // 调试：检查 buffer 类型
+        console.error(`[Worker] PNG buffer type: ${typeof buffer}, isBuffer: ${Buffer.isBuffer(buffer)}, constructor: ${buffer?.constructor?.name}`);
+
+        // 处理可能的非标准 Buffer 对象
+        if (Buffer.isBuffer(buffer)) {
+            return buffer;
+        }
+
+        if (buffer && typeof buffer === 'object') {
+            if (buffer.buffer && buffer.byteLength !== undefined) {
+                return Buffer.from(buffer);
+            }
+            if (Array.isArray(buffer)) {
+                return Buffer.from(buffer);
+            }
+        }
+
+        throw new Error(`PNG encoding failed: invalid buffer type ${typeof buffer}`);
     } else if (format === 'jpeg' || format === 'jpg') {
         // 移除 alpha 通道，与白色背景混合
         sharpInstance = sharpInstance.flatten({ background: { r: 255, g: 255, b: 255 } });
@@ -94,7 +132,25 @@ async function encodeWithSharp(rawBitmap, width, height, format, options = {}) {
             quality: options.jpegQuality || options.quality || 85,
             mozjpeg: true,
         }).toBuffer();
-        return Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
+
+        // 调试：检查 buffer 类型
+        console.error(`[Worker] JPEG buffer type: ${typeof buffer}, isBuffer: ${Buffer.isBuffer(buffer)}, constructor: ${buffer?.constructor?.name}`);
+
+        // 处理可能的非标准 Buffer 对象
+        if (Buffer.isBuffer(buffer)) {
+            return buffer;
+        }
+
+        if (buffer && typeof buffer === 'object') {
+            if (buffer.buffer && buffer.byteLength !== undefined) {
+                return Buffer.from(buffer);
+            }
+            if (Array.isArray(buffer)) {
+                return Buffer.from(buffer);
+            }
+        }
+
+        throw new Error(`JPEG encoding failed: invalid buffer type ${typeof buffer}`);
     }
     
     throw new Error(`Unsupported format: ${format}`);
