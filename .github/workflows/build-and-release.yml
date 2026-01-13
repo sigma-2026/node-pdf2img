@@ -191,30 +191,22 @@ jobs:
         run: |
           echo "=== Bumping node-pdf2img-native version ==="
           
-          # 获取 npm 上已发布的最新版本
+          # 获取 npm 上已发布的最新版本，直接设置为该版本再升级
           PUBLISHED_VERSION=$(npm view node-pdf2img-native version 2>/dev/null || echo "0.0.0")
-          LOCAL_VERSION=$(node -p 'require("./package.json").version')
-          echo "Published version: $PUBLISHED_VERSION"
-          echo "Local version: $LOCAL_VERSION"
+          echo "Published version on npm: $PUBLISHED_VERSION"
           
-          # 使用 semver 比较，选择较大的版本作为基础
-          # 先将本地版本设置为已发布版本（如果已发布版本更高）
-          if npx semver -r ">$LOCAL_VERSION" "$PUBLISHED_VERSION" > /dev/null 2>&1; then
-            echo "Setting local version to published version: $PUBLISHED_VERSION"
-            npm version "$PUBLISHED_VERSION" --no-git-tag-version --allow-same-version
-          fi
+          # 直接设置为已发布版本（确保基准正确）
+          npm version "$PUBLISHED_VERSION" --no-git-tag-version --allow-same-version || true
+          echo "Base version set to: $(node -p 'require(\"./package.json\").version')"
           
+          # 升级版本
           if [[ $GITHUB_REF == refs/tags/v* ]]; then
-            # Tag release - use patch version
             npm version patch --no-git-tag-version
           elif [[ $GITHUB_REF == refs/heads/beta/* ]]; then
-            # Beta release - use prerelease
             npm version prerelease --preid=beta --no-git-tag-version
           elif [[ $GITHUB_REF == refs/heads/next ]]; then
-            # Next release - use prerelease
             npm version prerelease --preid=next --no-git-tag-version
           else
-            # Release from master/main - use patch version
             npm version patch --no-git-tag-version
           fi
 
@@ -247,36 +239,30 @@ jobs:
           echo "Updated dependency:"
           grep node-pdf2img-native package.json
 
-          # 获取 npm 上已发布的最新版本
+          # 获取 npm 上已发布的最新版本，直接设置为该版本再升级
           PUBLISHED_VERSION=$(npm view node-pdf2img version 2>/dev/null || echo "0.0.0")
-          LOCAL_VERSION=$(node -p 'require("./package.json").version')
-          echo "Published version: $PUBLISHED_VERSION"
-          echo "Local version: $LOCAL_VERSION"
+          echo "Published version on npm: $PUBLISHED_VERSION"
           
-          # 使用 semver 比较，选择较大的版本作为基础
-          if npx semver -r ">$LOCAL_VERSION" "$PUBLISHED_VERSION" > /dev/null 2>&1; then
-            echo "Setting local version to published version: $PUBLISHED_VERSION"
-            npm version "$PUBLISHED_VERSION" --no-git-tag-version --allow-same-version
-          fi
+          # 直接设置为已发布版本（确保基准正确）
+          npm version "$PUBLISHED_VERSION" --no-git-tag-version --allow-same-version || true
+          echo "Base version set to: $(node -p 'require(\"./package.json\").version')"
 
-          # Determine release type
+          # 升级版本
           if [[ $GITHUB_REF == refs/tags/v* ]]; then
-            # Tag release
             npm version patch --no-git-tag-version
             npm publish --access public
           elif [[ $GITHUB_REF == refs/heads/beta/* ]]; then
-            # Beta release
             npm version prerelease --preid=beta --no-git-tag-version
             npm publish --tag beta --access public
           elif [[ $GITHUB_REF == refs/heads/next ]]; then
-            # Next release
             npm version prerelease --preid=next --no-git-tag-version
             npm publish --tag next --access public
           else
-            # Release from master/main
             npm version patch --no-git-tag-version
             npm publish --access public
           fi
+          
+          echo "Published version: $(node -p 'require(\"./package.json\").version')"
 
   # 创建 GitHub Release
   github-release:
