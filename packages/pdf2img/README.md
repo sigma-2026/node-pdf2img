@@ -1,6 +1,9 @@
-# @tencent/pdf2img
+# node-pdf2img
 
-高性能 PDF 转图片工具，基于 PDFium 原生渲染器 + Sharp 图像编码。
+High-performance PDF to image converter using PDFium native renderer + Sharp image encoding.
+
+[![npm version](https://badge.fury.io/js/node-pdf2img.svg)](https://badge.fury.io/js/node-pdf2img)
+[![Build Status](https://github.com/your-username/node-pdf2img/workflows/Build%20and%20Release/badge.svg)](https://github.com/your-username/node-pdf2img/actions)
 
 ## 特性
 
@@ -15,14 +18,14 @@
 - **多种输出格式**：支持 WebP、PNG、JPG 格式
 - **CLI 和 API**：支持命令行使用或作为 Node.js 模块引用
 
-## 安装
+## Installation
 
 ```bash
-# 作为项目依赖安装（API 调用）
-npm install @tencent/pdf2img
+# Install as project dependency (for API usage)
+npm install node-pdf2img
 
-# 全局安装（CLI 调用）
-npm install -g @tencent/pdf2img
+# Install globally (for CLI usage)
+npm install -g node-pdf2img
 ```
 
 ## CLI 使用
