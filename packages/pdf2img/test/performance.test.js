@@ -78,7 +78,7 @@ async function runPerformanceTest() {
         }
 
         const stat = fs.statSync(pdfPath);
-        const pageCount = getPageCount(pdfPath);
+        const pageCount = await getPageCount(pdfPath);
 
         console.log(`${colors.cyan}测试: ${testFile.description}${colors.reset}`);
         console.log(`  文件: ${testFile.name}`);

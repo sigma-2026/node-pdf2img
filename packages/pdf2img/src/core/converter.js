@@ -441,14 +441,41 @@ export async function convert(input, options = {}) {
 
     } else {
         // 返回 Buffer
-        outputResult = result.pages.map(page => ({
-            pageNum: page.pageNum,
-            width: page.width,
-            height: page.height,
-            success: page.success,
-            buffer: page.success ? page.buffer : null,
-            error: page.error,
-        })).sort((a, b) => a.pageNum - b.pageNum);
+        outputResult = result.pages.map(page => {
+            if (!page.success || !page.buffer) {
+                return {
+                    pageNum: page.pageNum,
+                    width: page.width,
+                    height: page.height,
+                    success: false,
+                    buffer: null,
+                    error: page.error || 'Render failed',
+                };
+            }
+
+            // 确保 buffer 是 Buffer 类型
+            let buffer = page.buffer;
+            if (!Buffer.isBuffer(buffer)) {
+                logger.error(`Buffer type mismatch: ${typeof buffer}, expected Buffer`);
+                return {
+                    pageNum: page.pageNum,
+                    width: page.width,
+                    height: page.height,
+                    success: false,
+                    buffer: null,
+                    error: 'Invalid buffer type returned from worker',
+                };
+            }
+
+            return {
+                pageNum: page.pageNum,
+                width: page.width,
+                height: page.height,
+                success: true,
+                buffer,
+                size: buffer.length,
+            };
+        }).sort((a, b) => a.pageNum - b.pageNum);
     }
 
     return {
