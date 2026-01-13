@@ -238,6 +238,15 @@ jobs:
           echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > .npmrc
           echo "=== Publishing node-pdf2img ==="
 
+          # 获取刚发布的 native 包版本
+          NATIVE_VERSION=$(cd ../native-renderer && node -p 'require("./package.json").version')
+          echo "Native package version: $NATIVE_VERSION"
+          
+          # 将 file: 引用替换为实际版本号
+          sed -i 's|"node-pdf2img-native": "file:../native-renderer"|"node-pdf2img-native": "^'"$NATIVE_VERSION"'"|g' package.json
+          echo "Updated dependency:"
+          grep node-pdf2img-native package.json
+
           # 获取 npm 上已发布的最新版本
           PUBLISHED_VERSION=$(npm view node-pdf2img version 2>/dev/null || echo "0.0.0")
           LOCAL_VERSION=$(node -p 'require("./package.json").version')
