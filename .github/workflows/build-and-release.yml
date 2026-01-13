@@ -112,10 +112,116 @@ jobs:
           path: packages/native-renderer/*
           if-no-files-found: error
 
+  # 为每个平台创建独立的 native 包（不合并，而是分别打包）
+  create-platform-packages:
+    name: Create platform-specific native packages
+    needs: build-native
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' && github.event.inputs.publish == 'true' ||
+      github.ref == 'refs/heads/master' || 
+      github.ref == 'refs/heads/main' || 
+      startsWith(github.ref, 'refs/tags/v') || 
+      startsWith(github.ref, 'refs/heads/beta/') || 
+      github.ref == 'refs/heads/next'
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create platform-specific native packages
+        shell: bash
+        run: |
+          echo "=== Creating platform-specific native packages ==="
+          
+          # Linux x64
+          if ls artifacts/native-linux-x64/*.node 2>&1; then
+            echo "Creating Linux x64 package..."
+            mkdir -p packages/node-pdf2img-native-linux-x64-gnu
+            cp artifacts/native-linux-x64/* packages/node-pdf2img-native-linux-x64-gnu/
+            cp packages/native-renderer/package.json packages/node-pdf2img-native-linux-x64-gnu/
+            cp packages/native-renderer/index.js packages/node-pdf2img-native-linux-x64-gnu/
+            
+            # Update package name
+            sed -i 's/"name": "node-pdf2img-native"/"name": "node-pdf2img-native-linux-x64-gnu"/g' packages/node-pdf2img-native-linux-x64-gnu/package.json
+            sed -i 's/"file:\.\.\/native-renderer"/"file:\.\.\/native-renderer"/g' packages/node-pdf2img-native-linux-x64-gnu/package.json
+          fi
+          
+          # Linux arm64
+          if ls artifacts/native-linux-arm64/*.node 2>&1; then
+            echo "Creating Linux arm64 package..."
+            mkdir -p packages/node-pdf2img-native-linux-arm64-gnu
+            cp artifacts/native-linux-arm64/* packages/node-pdf2img-native-linux-arm64-gnu/
+            cp packages/native-renderer/package.json packages/node-pdf2img-native-linux-arm64-gnu/
+            cp packages/native-renderer/index.js packages/node-pdf2img-native-linux-arm64-gnu/
+            
+            sed -i 's/"name": "node-pdf2img-native"/"name": "node-pdf2img-native-linux-arm64-gnu"/g' packages/node-pdf2img-native-linux-arm64-gnu/package.json
+            sed -i 's/"file:\.\.\/native-renderer"/"file:\.\.\/native-renderer"/g' packages/node-pdf2img-native-linux-arm64-gnu/package.json
+          fi
+          
+          # macOS x64
+          if ls artifacts/native-macos-x64/*.node 2>&1; then
+            echo "Creating macOS x64 package..."
+            mkdir -p packages/node-pdf2img-native-darwin-x64
+            cp artifacts/native-macos-x64/* packages/node-pdf2img-native-darwin-x64/
+            cp packages/native-renderer/package.json packages/node-pdf2img-native-darwin-x64/
+            cp packages/native-renderer/index.js packages/node-pdf2img-native-darwin-x64/
+            
+            sed -i 's/"name": "node-pdf2img-native"/"name": "node-pdf2img-native-darwin-x64"/g' packages/node-pdf2img-native-darwin-x64/package.json
+            sed -i 's/"file:\.\.\/native-renderer"/"file:\.\.\/native-renderer"/g' packages/node-pdf2img-native-darwin-x64/package.json
+          fi
+          
+          # macOS arm64
+          if ls artifacts/native-macos-arm64/*.node 2>&1; then
+            echo "Creating macOS arm64 package..."
+            mkdir -p packages/node-pdf2img-native-darwin-arm64
+            cp artifacts/native-macos-arm64/* packages/node-pdf2img-native-darwin-arm64/
+            cp packages/native-renderer/package.json packages/node-pdf2img-native-darwin-arm64/
+            cp packages/native-renderer/index.js packages/node-pdf2img-native-darwin-arm64/
+            
+            sed -i 's/"name": "node-pdf2img-native"/"name": "node-pdf2img-native-darwin-arm64"/g' packages/node-pdf2img-native-darwin-arm64/package.json
+            sed -i 's/"file:\.\.\/native-renderer"/"file:\.\.\/native-renderer"/g' packages/node-pdf2img-native-darwin-arm64/package.json
+          fi
+          
+          # Windows x64
+          if ls artifacts/native-windows-x64/*.node 2>&1; then
+            echo "Creating Windows x64 package..."
+            mkdir -p packages/node-pdf2img-native-win32-x64-msvc
+            cp artifacts/native-windows-x64/* packages/node-pdf2img-native-win32-x64-msvc/
+            cp packages/native-renderer/package.json packages/node-pdf2img-native-win32-x64-msvc/
+            cp packages/native-renderer/index.js packages/node-pdf2img-native-win32-x64-msvc/
+            
+            sed -i 's/"name": "node-pdf2img-native"/"name": "node-pdf2img-native-win32-x64-msvc"/g' packages/node-pdf2img-native-win32-x64-msvc/package.json
+            sed -i 's/"file:\.\.\/native-renderer"/"file:\.\.\/native-renderer"/g' packages/node-pdf2img-native-win32-x64-msvc/package.json
+          fi
+          
+          echo "=== All platform packages created ==="
+          ls -la packages/
+
+      - name: Upload platform packages as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-native-packages
+          path: packages/node-pdf2img-native-*/
+          if-no-files-found: error
+
   # 合并所有平台产物并发布
   release:
     name: Release
-    needs: build-native
+    needs: create-platform-packages
     runs-on: ubuntu-latest
     if: |
       github.event_name == 'workflow_dispatch' && github.event.inputs.publish == 'true' ||
@@ -145,43 +251,56 @@ jobs:
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
-      - name: Download all artifacts
+      - name: Download platform packages artifact
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          name: platform-native-packages
+          path: packages/
 
-      - name: Merge native modules
+      - name: Merge native packages
         shell: bash
         run: |
-          echo "=== Merging native modules ==="
-          mkdir -p packages/native-renderer
-          cp artifacts/native-linux-x64/* packages/native-renderer/ 2>&1 || echo "No Linux x64 files"
-          cp artifacts/native-linux-arm64/* packages/native-renderer/ 2>&1 || echo "No Linux arm64 files"
-          cp artifacts/native-macos-x64/* packages/native-renderer/ 2>&1 || echo "No macOS x64 files"
-          cp artifacts/native-macos-arm64/* packages/native-renderer/ 2>&1 || echo "No macOS arm64 files"
-          cp artifacts/native-windows-x64/* packages/native-renderer/ 2>&1 || echo "No Windows files"
-          echo "=== Merged files ==="
-          ls -la packages/native-renderer/ | grep -E "\.node|libpdfium" || echo "No native files found"
-
-      - name: Prepare native modules for package
-        shell: bash
-        run: |
-          echo "=== Preparing native modules for npm packaging ==="
-          cd packages/native-renderer
-          shopt -s nullglob
-          if ls *.node 2>&1; then
-            echo "Native .node files:"
-            ls -1 *.node
-          else
-            echo "Warning: No .node files found in native-renderer/"
-            echo "Tests may fail due to missing native modules"
-          fi
+          echo "=== Merging all platform packages ==="
+          ls -la packages/node-pdf2img-native-*/
+          
+          # List all created packages
+          for pkg in packages/node-pdf2img-native-*/; do
+            echo "Found package: $pkg"
+          done
 
       - name: Build main package
         run: pnpm -r build
 
-      - name: Test
-        run: pnpm -r test || echo "Some tests failed"
+      - name: Test (with skip)
+        shell: bash
+        run: |
+          echo "=== Running tests (may skip native renderer tests) ==="
+          pnpm -r test || echo "Some tests failed"
+
+      - name: Release
+        working-directory: packages/pdf2img
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > .npmrc
+          
+          # Determine release type
+          if [[ $GITHUB_REF == refs/tags/v* ]]; then
+            # Tag release
+            npm publish
+          elif [[ $GITHUB_REF == refs/heads/beta/* ]]; then
+            # Beta release
+            npm version prerelease --preid=beta -m "chore: release %s"
+            npm publish --tag beta
+          elif [[ $GITHUB_REF == refs/heads/next ]]; then
+            # Next release
+            npm version prerelease --preid=next -m "chore: release %s"
+            npm publish --tag next
+          else
+            # Release from master/main
+            npm publish
+          fi
 
       - name: Release
         working-directory: packages/pdf2img

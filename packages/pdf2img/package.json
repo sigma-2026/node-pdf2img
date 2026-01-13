@@ -48,7 +48,6 @@
         "arm64"
     ],
     "dependencies": {
-        "node-pdf2img-native": "file:../native-renderer",
         "commander": "^12.0.0",
         "cos-nodejs-sdk-v5": "^2.14.6",
         "dotenv": "^16.0.3",
@@ -57,12 +56,12 @@
         "piscina": "^5.1.4",
         "sharp": "^0.33.0"
     },
+    "optionalDependencies": {
+        "node-pdf2img-native": "file:../native-renderer"
+    },
     "devDependencies": {
         "@types/node": "^20.0.0"
     },
-    "bundleDependencies": [
-        "node-pdf2img-native"
-    ],
     "repository": {
         "type": "git",
         "url": "git+https://github.com/your-username/node-pdf2img.git"
