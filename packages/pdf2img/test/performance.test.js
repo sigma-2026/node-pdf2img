@@ -101,7 +101,7 @@ async function runPerformanceTest() {
             console.log(`  耗时: ${formatDuration(duration)}`);
             console.log(`  平均每页: ${formatDuration(duration / result.renderedPages)}`);
             console.log(`  输出大小: ${formatBytes(totalSize)}`);
-            console.log(`  原生渲染耗时: ${formatDuration(result.timing.native)}`);
+            console.log(`  原生渲染耗时: ${formatDuration(result.timing.render)}`);
             console.log('');
 
             results.push({
@@ -113,7 +113,7 @@ async function runPerformanceTest() {
                 duration,
                 avgPerPage: duration / result.renderedPages,
                 outputSize: totalSize,
-                nativeTime: result.timing.native,
+                nativeTime: result.timing.render,
                 success: true,
             });
 

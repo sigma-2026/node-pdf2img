@@ -76,22 +76,25 @@ async function encodeWithSharp(rawBitmap, width, height, format, options = {}) {
     });
 
     if (format === 'webp') {
-        return sharpInstance.webp({
+        const buffer = await sharpInstance.webp({
             quality: options.webpQuality || options.quality || 80,
             effort: options.webpMethod ?? 4,
         }).toBuffer();
+        return Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
     } else if (format === 'png') {
-        return sharpInstance.png({
+        const buffer = await sharpInstance.png({
             compressionLevel: options.pngCompression ?? 6,
             adaptiveFiltering: true,
         }).toBuffer();
+        return Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
     } else if (format === 'jpeg' || format === 'jpg') {
         // 移除 alpha 通道，与白色背景混合
         sharpInstance = sharpInstance.flatten({ background: { r: 255, g: 255, b: 255 } });
-        return sharpInstance.jpeg({
+        const buffer = await sharpInstance.jpeg({
             quality: options.jpegQuality || options.quality || 85,
             mozjpeg: true,
         }).toBuffer();
+        return Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
     }
     
     throw new Error(`Unsupported format: ${format}`);
