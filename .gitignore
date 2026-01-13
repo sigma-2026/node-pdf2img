@@ -1,10 +1,11 @@
 # 依赖
 node_modules/
-native-renderer
+packages/*/node_modules/
 
 # 构建产物
 *.node
 target/
+packages/*/target/
 
 # 输出目录
 output/
