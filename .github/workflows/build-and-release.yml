@@ -69,8 +69,11 @@ jobs:
         with:
           version: 8
 
+      - name: Clear lockfile cache
+        run: rm -f pnpm-lock.yaml
+
       - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install
 
       - name: Install cross-compilation tools (Linux ARM64)
         if: matrix.platform == 'linux-arm64'
