@@ -186,6 +186,26 @@ jobs:
           echo "=== Running tests (may skip native renderer tests) ==="
           pnpm -r test || echo "Some tests failed"
 
+      - name: Bump native renderer version
+        working-directory: packages/native-renderer
+        run: |
+          echo "=== Bumping node-pdf2img-native version ==="
+          if [[ $GITHUB_REF == refs/tags/v* ]]; then
+            # Tag release - use patch version
+            npm version patch -m "chore: release %s"
+          elif [[ $GITHUB_REF == refs/heads/beta/* ]]; then
+            # Beta release - use prerelease
+            npm version prerelease --preid=beta -m "chore: release %s"
+          elif [[ $GITHUB_REF == refs/heads/next ]]; then
+            # Next release - use prerelease
+            npm version prerelease --preid=next -m "chore: release %s"
+          else
+            # Release from master/main - use patch version
+            npm version patch -m "chore: release %s"
+          fi
+          
+          echo "New version: $(node -p 'require(\"./package.json\").version')"
+
       - name: Publish native renderer package
         working-directory: packages/native-renderer
         env:
