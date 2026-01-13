@@ -151,7 +151,7 @@ jobs:
           if ls artifacts/native-linux-x64/*.node 2>&1; then
             echo "Creating Linux x64 package..."
             mkdir -p packages/node-pdf2img-native-linux-x64-gnu
-            cp artifacts/native-linux-x64/* packages/node-pdf2img-native-linux-x64-gnu/
+            cp -r artifacts/native-linux-x64/* packages/node-pdf2img-native-linux-x64-gnu/
             cp packages/native-renderer/package.json packages/node-pdf2img-native-linux-x64-gnu/
             cp packages/native-renderer/index.js packages/node-pdf2img-native-linux-x64-gnu/
             
@@ -164,7 +164,7 @@ jobs:
           if ls artifacts/native-linux-arm64/*.node 2>&1; then
             echo "Creating Linux arm64 package..."
             mkdir -p packages/node-pdf2img-native-linux-arm64-gnu
-            cp artifacts/native-linux-arm64/* packages/node-pdf2img-native-linux-arm64-gnu/
+            cp -r artifacts/native-linux-arm64/* packages/node-pdf2img-native-linux-arm64-gnu/
             cp packages/native-renderer/package.json packages/node-pdf2img-native-linux-arm64-gnu/
             cp packages/native-renderer/index.js packages/node-pdf2img-native-linux-arm64-gnu/
             
@@ -176,7 +176,7 @@ jobs:
           if ls artifacts/native-macos-x64/*.node 2>&1; then
             echo "Creating macOS x64 package..."
             mkdir -p packages/node-pdf2img-native-darwin-x64
-            cp artifacts/native-macos-x64/* packages/node-pdf2img-native-darwin-x64/
+            cp -r artifacts/native-macos-x64/* packages/node-pdf2img-native-darwin-x64/
             cp packages/native-renderer/package.json packages/node-pdf2img-native-darwin-x64/
             cp packages/native-renderer/index.js packages/node-pdf2img-native-darwin-x64/
             
@@ -188,7 +188,7 @@ jobs:
           if ls artifacts/native-macos-arm64/*.node 2>&1; then
             echo "Creating macOS arm64 package..."
             mkdir -p packages/node-pdf2img-native-darwin-arm64
-            cp artifacts/native-macos-arm64/* packages/node-pdf2img-native-darwin-arm64/
+            cp -r artifacts/native-macos-arm64/* packages/node-pdf2img-native-darwin-arm64/
             cp packages/native-renderer/package.json packages/node-pdf2img-native-darwin-arm64/
             cp packages/native-renderer/index.js packages/node-pdf2img-native-darwin-arm64/
             
@@ -200,7 +200,7 @@ jobs:
           if ls artifacts/native-windows-x64/*.node 2>&1; then
             echo "Creating Windows x64 package..."
             mkdir -p packages/node-pdf2img-native-win32-x64-msvc
-            cp artifacts/native-windows-x64/* packages/node-pdf2img-native-win32-x64-msvc/
+            cp -r artifacts/native-windows-x64/* packages/node-pdf2img-native-win32-x64-msvc/
             cp packages/native-renderer/package.json packages/node-pdf2img-native-win32-x64-msvc/
             cp packages/native-renderer/index.js packages/node-pdf2img-native-win32-x64-msvc/
             
