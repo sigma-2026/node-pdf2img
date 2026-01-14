@@ -517,7 +517,7 @@ export async function convert(input, options = {}) {
 /**
  * 获取 PDF 页数（异步版本）
  *
- * @param {string|Buffer} input - PDF 输入（文件路径或 Buffer）
+ * @param {string|Buffer} input - PDF 输入（文件路径、URL 或 Buffer）
  * @returns {Promise<number>} 页数
  */
 export async function getPageCount(input) {
@@ -530,6 +530,23 @@ export async function getPageCount(input) {
     }
     
     if (typeof input === 'string') {
+        // 检查是否是 URL
+        if (input.startsWith('http://') || input.startsWith('https://')) {
+            // URL 输入：下载到临时文件后获取页数
+            const tempFile = await downloadToTempFile(input);
+            try {
+                return nativeRenderer.getPageCountFromFile(tempFile);
+            } finally {
+                // 清理临时文件
+                try {
+                    await fs.promises.unlink(tempFile);
+                } catch {
+                    // 忽略清理错误
+                }
+            }
+        }
+        
+        // 本地文件路径
         try {
             await fs.promises.access(input, fs.constants.R_OK);
         } catch {
@@ -538,7 +555,7 @@ export async function getPageCount(input) {
         return nativeRenderer.getPageCountFromFile(input);
     }
     
-    throw new Error('Invalid input: must be a file path or Buffer');
+    throw new Error('Invalid input: must be a file path, URL, or Buffer');
 }
 
 /**

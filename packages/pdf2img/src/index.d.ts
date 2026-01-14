@@ -92,10 +92,10 @@ export function convert(input: string | Buffer, options?: ConvertOptions): Promi
 /**
  * 获取 PDF 页数
  *
- * @param input - PDF 文件路径或 Buffer
+ * @param input - PDF 文件路径、URL 或 Buffer
  * @returns 页数
  */
-export function getPageCount(input: string | Buffer): number;
+export function getPageCount(input: string | Buffer): Promise<number>;
 
 /**
  * 检查原生渲染器是否可用

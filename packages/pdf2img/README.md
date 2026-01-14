@@ -157,6 +157,32 @@ const result = await convert('./document.pdf', {
 });
 ```
 
+### pages 参数说明
+
+`pages` 参数控制要转换的页面：
+
+- **空数组 `[]` 或不传**：转换所有页面
+- **指定页码数组**：只转换指定页面（1-based）
+
+```javascript
+// 转换所有页面（推荐）
+await convert('./document.pdf', { pages: [] });
+
+// 只转换第 1、3、5 页
+await convert('./document.pdf', { pages: [1, 3, 5] });
+```
+
+> **最佳实践**：如果需要转换所有页面，直接使用 `convert()` 并传空 `pages` 数组，**不要**先调用 `getPageCount()` 获取页数再传入。这样可以避免 URL 输入时重复下载 PDF 文件。
+>
+> ```javascript
+> // ❌ 不推荐：URL 会被下载两次
+> const pageCount = await getPageCount(url);
+> const result = await convert(url, { pages: Array.from({length: pageCount}, (_, i) => i + 1) });
+>
+> // ✅ 推荐：直接转换所有页面
+> const result = await convert(url, { pages: [] });
+> ```
+
 ### 自定义渲染宽度
 
 ```javascript
