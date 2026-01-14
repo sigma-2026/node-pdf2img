@@ -7,10 +7,12 @@
 ## 特性
 
 - **高性能**：使用 PDFium 原生渲染，多线程并行处理
+- **流式渲染**：URL 输入支持 HTTP Range 请求，大文件无需完整下载
 - **多种格式**：支持 WebP、PNG、JPG 输出
 - **多种输入**：支持本地文件、URL、Buffer
 - **多种输出**：支持本地文件、Buffer、腾讯云 COS
 - **CLI + API**：命令行工具和 Node.js 模块双模式
+- **广泛兼容**：支持 GLIBC 2.17+ (CentOS 7/RHEL 7+)
 
 ## 安装
 
@@ -25,7 +27,10 @@ npm install -g node-pdf2img
 ## 系统要求
 
 - Node.js >= 18.0.0
-- 支持平台：Linux x64/arm64、macOS x64/arm64、Windows x64
+- 支持平台：
+  - Linux x64/arm64 (GLIBC 2.17+，兼容 CentOS 7/RHEL 7+)
+  - macOS x64/arm64
+  - Windows x64
 
 ## CLI 使用
 
@@ -200,7 +205,14 @@ const result = await convert('https://example.com/document.pdf', {
     outputType: 'file',
     outputDir: './output',
 });
+
+// 查看流式渲染统计（仅 URL 输入时存在）
+if (result.streamStats) {
+    console.log(`流式渲染: 缓存命中 ${result.streamStats.cacheHits} 次`);
+}
 ```
+
+> **流式渲染**：对于大于 2MB 的远程 PDF，会自动使用 HTTP Range 请求按需获取数据，避免完整下载。小于 2MB 的文件会直接下载后渲染，减少 Range 请求开销。
 
 ### 上传到腾讯云 COS
 
@@ -300,6 +312,20 @@ PDF 转图片。
 |------|------|--------|
 | `PDF2IMG_THREAD_COUNT` | 工作线程数 | CPU 核心数 |
 | `PDF2IMG_DEBUG` | 启用调试日志 | `false` |
+
+## 架构
+
+模块化设计，职责分离：
+
+```
+src/core/
+├── converter.js      # 主 API 入口
+├── renderer.js       # PDF 渲染逻辑（流式/下载/本地）
+├── thread-pool.js    # 线程池管理
+├── downloader.js     # 远程文件下载
+├── output-handler.js # 文件保存和 COS 上传
+└── config.js         # 配置常量
+```
 
 ## 许可证
 

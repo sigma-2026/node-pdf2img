@@ -162,6 +162,9 @@ export async function uploadToCos(pages, cosConfig, keyPrefix, format = 'webp', 
     const cos = new COS({
         SecretId: cosConfig.secretId,
         SecretKey: cosConfig.secretKey,
+        Protocol: cosConfig.protocol || 'https:',
+        ServiceDomain: cosConfig.serviceDomain,
+        Domain: cosConfig.domain,
     });
 
     const ext = getExtension(format);
