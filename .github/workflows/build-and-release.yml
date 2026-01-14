@@ -29,25 +29,32 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Linux x64 - 使用 zig 编译以支持 GLIBC 2.17+
           - os: ubuntu-latest
             platform: linux-x64
             target: x86_64-unknown-linux-gnu
+            use_zig: true
             
+          # Linux ARM64 - 使用 zig 编译以支持 GLIBC 2.17+
           - os: ubuntu-latest
             platform: linux-arm64
             target: aarch64-unknown-linux-gnu
+            use_zig: true
             
-          - os: macos-15-intel
+          - os: macos-13
             platform: macos-x64
             target: x86_64-apple-darwin
+            use_zig: false
             
           - os: macos-latest
             platform: macos-arm64
             target: aarch64-apple-darwin
+            use_zig: false
             
           - os: windows-latest
             platform: windows-x64
             target: x86_64-pc-windows-msvc
+            use_zig: false
 
     steps:
       - name: Checkout
@@ -76,18 +83,27 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Install cross-compilation tools (Linux ARM64)
-        if: matrix.platform == 'linux-arm64'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-          mkdir -p ~/.cargo
-          cat >> ~/.cargo/config.toml << EOF
-          [target.aarch64-unknown-linux-gnu]
-          linker = "aarch64-linux-gnu-gcc"
-          EOF
+      - name: Install zig (Linux)
+        if: matrix.use_zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.11.0
 
-      - name: Build native module
+      - name: Install cargo-zigbuild (Linux)
+        if: matrix.use_zig
+        run: cargo install cargo-zigbuild
+
+      - name: Build native module (with zig for GLIBC 2.17 compatibility)
+        if: matrix.use_zig
+        shell: bash
+        working-directory: packages/native-renderer
+        run: |
+          pnpm install --no-frozen-lockfile
+          # Use napi build with --zig flag to target GLIBC 2.17 (CentOS 7/RHEL 7 compatible)
+          pnpm run build -- --target ${{ matrix.target }} --zig
+
+      - name: Build native module (standard)
+        if: ${{ !matrix.use_zig }}
         shell: bash
         working-directory: packages/native-renderer
         run: |
