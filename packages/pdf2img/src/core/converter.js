@@ -424,6 +424,59 @@ export async function convert(input, options = {}) {
     // 使用线程池渲染页面
     const result = await renderPages(input, inputType, pages, encodeOptions);
 
+    // 恢复 Buffer 类型
+    // Piscina 跨线程传递时 Buffer 可能被序列化为普通对象 { type: 'Buffer', data: [...] }
+    const normalizedPages = result.pages.map(page => {
+        if (!page.success || !page.buffer) {
+            return {
+                pageNum: page.pageNum,
+                width: page.width,
+                height: page.height,
+                success: false,
+                buffer: null,
+                error: page.error || 'Render failed',
+            };
+        }
+
+        let buffer = page.buffer;
+        if (!Buffer.isBuffer(buffer)) {
+            try {
+                if (buffer && typeof buffer === 'object') {
+                    if (buffer.type === 'Buffer' && Array.isArray(buffer.data)) {
+                        buffer = Buffer.from(buffer.data);
+                    } else if (buffer.data && ArrayBuffer.isView(buffer.data)) {
+                        buffer = Buffer.from(buffer.data);
+                    } else if (ArrayBuffer.isView(buffer)) {
+                        buffer = Buffer.from(buffer);
+                    } else {
+                        buffer = Buffer.from(buffer);
+                    }
+                } else {
+                    throw new Error(`Cannot convert ${typeof buffer} to Buffer`);
+                }
+            } catch (e) {
+                logger.error(`Buffer type mismatch: ${typeof page.buffer}, conversion failed: ${e.message}`);
+                return {
+                    pageNum: page.pageNum,
+                    width: page.width,
+                    height: page.height,
+                    success: false,
+                    buffer: null,
+                    error: `Invalid buffer type returned from worker: ${e.message}`,
+                };
+            }
+        }
+
+        return {
+            pageNum: page.pageNum,
+            width: page.width,
+            height: page.height,
+            success: true,
+            buffer,
+            size: buffer.length,
+        };
+    });
+
     // 处理输出
     let outputResult;
 
@@ -431,72 +484,17 @@ export async function convert(input, options = {}) {
         if (!outputDir) {
             throw new Error('outputDir is required when outputType is "file"');
         }
-        outputResult = await saveToFiles(result.pages, outputDir, prefix, normalizedFormat, concurrency);
+        outputResult = await saveToFiles(normalizedPages, outputDir, prefix, normalizedFormat, concurrency);
 
     } else if (outputType === OutputType.COS) {
         if (!cosConfig) {
             throw new Error('cos config is required when outputType is "cos"');
         }
-        outputResult = await uploadToCos(result.pages, cosConfig, cosKeyPrefix, normalizedFormat, concurrency);
+        outputResult = await uploadToCos(normalizedPages, cosConfig, cosKeyPrefix, normalizedFormat, concurrency);
 
     } else {
         // 返回 Buffer
-        outputResult = result.pages.map(page => {
-            if (!page.success || !page.buffer) {
-                return {
-                    pageNum: page.pageNum,
-                    width: page.width,
-                    height: page.height,
-                    success: false,
-                    buffer: null,
-                    error: page.error || 'Render failed',
-                };
-            }
-
-            // 确保 buffer 是 Buffer 类型
-            // Piscina 跨线程传递时 Buffer 可能被序列化为普通对象
-            let buffer = page.buffer;
-            if (!Buffer.isBuffer(buffer)) {
-                // 尝试从序列化的对象恢复 Buffer
-                try {
-                    if (buffer && typeof buffer === 'object') {
-                        // 可能是 { type: 'Buffer', data: [...] } 格式
-                        if (buffer.type === 'Buffer' && Array.isArray(buffer.data)) {
-                            buffer = Buffer.from(buffer.data);
-                        } else if (buffer.data && ArrayBuffer.isView(buffer.data)) {
-                            buffer = Buffer.from(buffer.data);
-                        } else if (ArrayBuffer.isView(buffer)) {
-                            // Uint8Array 等 TypedArray
-                            buffer = Buffer.from(buffer);
-                        } else {
-                            // 最后尝试直接转换
-                            buffer = Buffer.from(buffer);
-                        }
-                    } else {
-                        throw new Error(`Cannot convert ${typeof buffer} to Buffer`);
-                    }
-                } catch (e) {
-                    logger.error(`Buffer type mismatch: ${typeof page.buffer}, conversion failed: ${e.message}`);
-                    return {
-                        pageNum: page.pageNum,
-                        width: page.width,
-                        height: page.height,
-                        success: false,
-                        buffer: null,
-                        error: `Invalid buffer type returned from worker: ${e.message}`,
-                    };
-                }
-            }
-
-            return {
-                pageNum: page.pageNum,
-                width: page.width,
-                height: page.height,
-                success: true,
-                buffer,
-                size: buffer.length,
-            };
-        }).sort((a, b) => a.pageNum - b.pageNum);
+        outputResult = normalizedPages.sort((a, b) => a.pageNum - b.pageNum);
     }
 
     return {
