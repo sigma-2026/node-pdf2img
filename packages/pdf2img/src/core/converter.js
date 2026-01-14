@@ -15,62 +15,15 @@
  */
 
 import fs from 'fs';
-import path from 'path';
-import os from 'os';
-import { pipeline } from 'stream/promises';
-import { fileURLToPath } from 'url';
-import pLimit from 'p-limit';
-import Piscina from 'piscina';
 import { createLogger } from '../utils/logger.js';
-import { RENDER_CONFIG, TIMEOUT_CONFIG, SUPPORTED_FORMATS, getExtension, getMimeType } from './config.js';
+import { RENDER_CONFIG, SUPPORTED_FORMATS } from './config.js';
 import * as nativeRenderer from '../renderers/native.js';
+import { getThreadCount, getThreadPoolStats, destroyThreadPool } from './thread-pool.js';
+import { downloadToTempFile } from './downloader.js';
+import { saveToFiles, uploadToCos, DEFAULT_CONCURRENCY } from './output-handler.js';
+import { InputType, detectInputType, renderPages } from './renderer.js';
 
 const logger = createLogger('Converter');
-
-// ==================== 线程池初始化 ====================
-
-// 获取 worker.js 的路径
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const workerPath = path.resolve(__dirname, '../worker.js');
-
-// 创建全局线程池实例
-// 线程数默认为 CPU 核心数，可通过环境变量调整
-const threadCount = parseInt(process.env.PDF2IMG_THREAD_COUNT, 10) || os.cpus().length;
-
-let piscina = null;
-
-/**
- * 获取或创建线程池实例（懒加载）
- */
-function getThreadPool() {
-    if (!piscina) {
-        piscina = new Piscina({
-            filename: workerPath,
-            maxThreads: threadCount,
-            idleTimeout: 30000, // 空闲 30 秒后销毁线程
-        });
-        logger.info(`Thread pool initialized with ${threadCount} workers`);
-    }
-    return piscina;
-}
-
-/**
- * 默认并发限制
- */
-const DEFAULT_CONCURRENCY = {
-    FILE_IO: 10,      // 文件写入并发数
-    COS_UPLOAD: 8,    // COS 上传并发数
-};
-
-/**
- * 输入类型枚举
- */
-export const InputType = {
-    FILE: 'file',
-    URL: 'url',
-    BUFFER: 'buffer',
-};
 
 /**
  * 输出类型枚举
@@ -81,279 +34,8 @@ export const OutputType = {
     COS: 'cos',        // 上传到腾讯云 COS
 };
 
-/**
- * 检测输入类型
- */
-function detectInputType(input) {
-    if (Buffer.isBuffer(input)) {
-        return InputType.BUFFER;
-    }
-    if (typeof input === 'string') {
-        if (input.startsWith('http://') || input.startsWith('https://')) {
-            return InputType.URL;
-        }
-        return InputType.FILE;
-    }
-    throw new Error('Invalid input: must be a file path, URL, or Buffer');
-}
-
-/**
- * 从 URL 获取文件大小
- */
-async function getRemoteFileSize(url) {
-    const response = await fetch(url, {
-        method: 'HEAD',
-        signal: AbortSignal.timeout(TIMEOUT_CONFIG.DOWNLOAD_TIMEOUT),
-    });
-
-    if (!response.ok) {
-        throw new Error(`Failed to get file size: ${response.status} ${response.statusText}`);
-    }
-
-    const contentLength = response.headers.get('content-length');
-    if (!contentLength) {
-        throw new Error('Server did not return Content-Length header');
-    }
-
-    return parseInt(contentLength, 10);
-}
-
-/**
- * 流式下载远程文件到临时文件
- */
-async function downloadToTempFile(url) {
-    const response = await fetch(url, {
-        signal: AbortSignal.timeout(TIMEOUT_CONFIG.DOWNLOAD_TIMEOUT),
-    });
-
-    if (!response.ok) {
-        throw new Error(`Failed to download file: ${response.status} ${response.statusText}`);
-    }
-
-    const tempDir = os.tmpdir();
-    const tempFile = path.join(tempDir, `pdf2img_${Date.now()}_${Math.random().toString(36).slice(2)}.pdf`);
-    
-    const fileStream = fs.createWriteStream(tempFile);
-    
-    try {
-        await pipeline(response.body, fileStream);
-        return tempFile;
-    } catch (err) {
-        try {
-            await fs.promises.unlink(tempFile);
-        } catch {}
-        throw err;
-    }
-}
-
-/**
- * 保存单个页面到文件
- */
-async function savePageToFile(page, outputDir, prefix, ext) {
-    if (!page.success || !page.buffer) {
-        return { ...page, outputPath: null };
-    }
-
-    try {
-        const filename = `${prefix}_${page.pageNum}.${ext}`;
-        const outputPath = path.join(outputDir, filename);
-        await fs.promises.writeFile(outputPath, page.buffer);
-
-        return {
-            pageNum: page.pageNum,
-            width: page.width,
-            height: page.height,
-            success: true,
-            outputPath,
-            size: page.buffer.length,
-        };
-    } catch (err) {
-        return {
-            pageNum: page.pageNum,
-            width: page.width,
-            height: page.height,
-            success: false,
-            error: `File save failed: ${err.message}`,
-            outputPath: null,
-        };
-    }
-}
-
-/**
- * 保存渲染结果到文件
- */
-async function saveToFiles(pages, outputDir, prefix = 'page', format = 'webp', concurrency = DEFAULT_CONCURRENCY.FILE_IO) {
-    await fs.promises.mkdir(outputDir, { recursive: true });
-
-    const ext = getExtension(format);
-    const limit = pLimit(concurrency);
-
-    const results = await Promise.all(
-        pages.map(page => limit(() => savePageToFile(page, outputDir, prefix, ext)))
-    );
-
-    return results.sort((a, b) => a.pageNum - b.pageNum);
-}
-
-/**
- * 上传单个页面到 COS
- */
-async function uploadPageToCos(page, cos, cosConfig, keyPrefix, ext, mimeType) {
-    if (!page.success || !page.buffer) {
-        return { ...page, cosKey: null };
-    }
-
-    try {
-        const key = `${keyPrefix}/page_${page.pageNum}.${ext}`;
-
-        await new Promise((resolve, reject) => {
-            cos.putObject({
-                Bucket: cosConfig.bucket,
-                Region: cosConfig.region,
-                Key: key,
-                Body: page.buffer,
-                ContentType: mimeType,
-            }, (err) => {
-                if (err) reject(err);
-                else resolve();
-            });
-        });
-
-        return {
-            pageNum: page.pageNum,
-            width: page.width,
-            height: page.height,
-            success: true,
-            cosKey: key,
-            size: page.buffer.length,
-        };
-    } catch (err) {
-        return {
-            pageNum: page.pageNum,
-            width: page.width,
-            height: page.height,
-            success: false,
-            error: `Upload failed: ${err.message}`,
-            cosKey: null,
-        };
-    }
-}
-
-/**
- * 上传渲染结果到 COS
- */
-async function uploadToCos(pages, cosConfig, keyPrefix, format = 'webp', concurrency = DEFAULT_CONCURRENCY.COS_UPLOAD) {
-    const COS = (await import('cos-nodejs-sdk-v5')).default;
-
-    const cos = new COS({
-        SecretId: cosConfig.secretId,
-        SecretKey: cosConfig.secretKey,
-    });
-
-    const ext = getExtension(format);
-    const mimeType = getMimeType(format);
-    const limit = pLimit(concurrency);
-
-    const results = await Promise.all(
-        pages.map(page => limit(() => uploadPageToCos(page, cos, cosConfig, keyPrefix, ext, mimeType)))
-    );
-
-    return results.sort((a, b) => a.pageNum - b.pageNum);
-}
-
-/**
- * 使用线程池渲染 PDF 页面
- * 
- * 主线程负责协调，工作线程负责 CPU 密集型任务
- * 
- * @param {string|Buffer} input - 输入
- * @param {string} inputType - 输入类型
- * @param {number[]} pages - 页码数组
- * @param {Object} options - 选项
- * @returns {Promise<Object>} 渲染结果
- */
-async function renderPages(input, inputType, pages, options) {
-    const startTime = Date.now();
-    let filePath = null;
-    let pdfBuffer = null;
-    let tempFile = null;
-    let numPages;
-
-    // 准备输入
-    if (inputType === InputType.FILE) {
-        try {
-            await fs.promises.access(input, fs.constants.R_OK);
-        } catch {
-            throw new Error(`File not found or not readable: ${input}`);
-        }
-        filePath = input;
-        numPages = nativeRenderer.getPageCountFromFile(filePath);
-    } else if (inputType === InputType.BUFFER) {
-        pdfBuffer = Buffer.isBuffer(input) ? input : Buffer.from(input);
-        numPages = nativeRenderer.getPageCount(pdfBuffer);
-    } else if (inputType === InputType.URL) {
-        const fileSize = await getRemoteFileSize(input);
-        logger.debug(`Remote file size: ${(fileSize / 1024 / 1024).toFixed(2)}MB, downloading...`);
-        tempFile = await downloadToTempFile(input);
-        filePath = tempFile;
-        numPages = nativeRenderer.getPageCountFromFile(filePath);
-    }
-
-    // 确定目标页码
-    let targetPages;
-    if (pages.length === 0) {
-        targetPages = Array.from({ length: numPages }, (_, i) => i + 1);
-    } else {
-        targetPages = pages.filter(p => p >= 1 && p <= numPages);
-    }
-
-    logger.debug(`Rendering ${targetPages.length} pages using thread pool (${threadCount} workers)`);
-
-    // 获取线程池
-    const pool = getThreadPool();
-
-    try {
-        // 为每一页创建任务并提交到线程池
-        const tasks = targetPages.map(pageNum => {
-            const task = {
-                pageNum,
-                options,
-            };
-            
-            if (filePath) {
-                task.filePath = filePath;
-            } else if (pdfBuffer) {
-                // 注意：Buffer 会被序列化传递给工作线程
-                // 对于大文件，建议先保存到临时文件再传递路径
-                task.pdfBuffer = pdfBuffer;
-            }
-            
-            // 提交任务到线程池
-            return pool.run(task);
-        });
-
-        // 等待所有页面的并行处理完成
-        const results = await Promise.all(tasks);
-
-        results.sort((a, b) => a.pageNum - b.pageNum);
-
-        return {
-            success: true,
-            numPages,
-            pages: results,
-            totalTime: Date.now() - startTime,
-            renderTime: results.reduce((sum, p) => sum + (p.renderTime || 0), 0),
-            encodeTime: results.reduce((sum, p) => sum + (p.encodeTime || 0), 0),
-        };
-    } finally {
-        // 清理临时文件
-        if (tempFile) {
-            try {
-                await fs.promises.unlink(tempFile);
-            } catch {}
-        }
-    }
-}
+// 重新导出 InputType
+export { InputType };
 
 /**
  * PDF 转图片
@@ -497,6 +179,8 @@ export async function convert(input, options = {}) {
         outputResult = normalizedPages.sort((a, b) => a.pageNum - b.pageNum);
     }
 
+    const threadCount = getThreadCount();
+
     return {
         success: true,
         numPages: result.numPages,
@@ -511,6 +195,8 @@ export async function convert(input, options = {}) {
         threadPool: {
             workers: threadCount,
         },
+        // 流式渲染统计（仅 URL 输入时存在）
+        ...(result.streamStats && { streamStats: result.streamStats }),
     };
 }
 
@@ -594,35 +280,5 @@ export function getVersion() {
     return nativeRenderer.getVersion();
 }
 
-/**
- * 获取线程池统计信息
- */
-export function getThreadPoolStats() {
-    if (!piscina) {
-        return {
-            initialized: false,
-            workers: threadCount,
-        };
-    }
-    return {
-        initialized: true,
-        workers: threadCount,
-        completed: piscina.completed,
-        waitTime: piscina.waitTime,
-        runTime: piscina.runTime,
-        utilization: piscina.utilization,
-    };
-}
-
-/**
- * 销毁线程池
- * 
- * 在应用关闭时调用，释放工作线程资源
- */
-export async function destroyThreadPool() {
-    if (piscina) {
-        await piscina.destroy();
-        piscina = null;
-        logger.info('Thread pool destroyed');
-    }
-}
+// 重新导出线程池相关函数
+export { getThreadPoolStats, destroyThreadPool };
