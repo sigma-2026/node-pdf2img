@@ -87,7 +87,7 @@ describe('PDF2IMG CLI 测试', () => {
             const { code, stdout } = await runCli(['--version-info']);
             assert.strictEqual(code, 0, '退出码应该是 0');
             assert.ok(stdout.includes('pdf2img'), '应该包含包名');
-            assert.ok(stdout.includes('原生渲染器') || stdout.includes('Native'), '应该包含渲染器信息');
+            assert.ok(stdout.includes('PDFium') || stdout.includes('PDF.js'), '应该包含渲染器信息');
         });
     });
 

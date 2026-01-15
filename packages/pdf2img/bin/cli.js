@@ -12,7 +12,12 @@
  *   pdf2img document.pdf -p 1,2,3 -o ./output
  *   pdf2img document.pdf --quality 90 --width 1920 -o ./output
  *   pdf2img document.pdf --format png -o ./output  # 输出 PNG 格式
+ *   pdf2img document.pdf --renderer pdfjs -o ./output  # 使用 PDF.js 渲染器
  *   pdf2img document.pdf --cos --cos-prefix images/doc  # 上传到 COS
+ *
+ * 渲染器：
+ *   pdfium  - PDFium 原生渲染器（默认，高性能）
+ *   pdfjs   - PDF.js 渲染器（纯 JavaScript，无需原生依赖）
  *
  * COS 环境变量：
  *   COS_SECRET_ID     - 腾讯云 SecretId
@@ -42,10 +47,10 @@ try {
 
 // 处理 --version-info 选项（在解析前检查）
 if (process.argv.includes('--version-info')) {
-    const { isAvailable, getVersion } = await import('../src/index.js');
+    const { isAvailable, getVersion, RendererType } = await import('../src/index.js');
     console.log(`pdf2img v${pkg.version}`);
-    console.log(`原生渲染器: ${getVersion()}`);
-    console.log(`可用: ${isAvailable() ? '是' : '否'}`);
+    console.log(`PDFium 渲染器: ${isAvailable(RendererType.PDFIUM) ? getVersion(RendererType.PDFIUM) : '不可用'}`);
+    console.log(`PDF.js 渲染器: ${isAvailable(RendererType.PDFJS) ? '可用' : '不可用'}`);
     process.exit(0);
 }
 
@@ -59,6 +64,7 @@ program
     .option('-w, --width <width>', '目标渲染宽度（像素）', '1920')
     .option('-q, --quality <quality>', '图片质量（0-100，用于 webp/jpg）', '100')
     .option('-f, --format <format>', '输出格式：webp, png, jpg', 'webp')
+    .option('-r, --renderer <renderer>', '渲染器：pdfium（默认）或 pdfjs', 'pdfium')
     .option('--prefix <prefix>', '输出文件名前缀', 'page')
     .option('--info', '仅显示 PDF 信息（页数）')
     .option('--version-info', '显示原生渲染器版本')
@@ -77,20 +83,31 @@ program
         }
 
         // 动态导入主模块
-        const { convert, getPageCount, isAvailable, getVersion } = await import('../src/index.js');
+        const { convert, getPageCount, isAvailable, getVersion, RendererType } = await import('../src/index.js');
 
         // 显示版本信息
         if (options.versionInfo) {
             console.log(`pdf2img v${pkg.version}`);
-            console.log(`原生渲染器: ${getVersion()}`);
-            console.log(`可用: ${isAvailable() ? '是' : '否'}`);
+            console.log(`PDFium 渲染器: ${isAvailable(RendererType.PDFIUM) ? getVersion(RendererType.PDFIUM) : '不可用'}`);
+            console.log(`PDF.js 渲染器: ${isAvailable(RendererType.PDFJS) ? '可用' : '不可用'}`);
             return;
         }
 
-        // 检查 native renderer
-        if (!isAvailable()) {
-            console.error('错误：原生渲染器不可用。');
-            console.error('请确保 PDFium 库已正确安装。');
+        // 验证渲染器
+        const renderer = options.renderer.toLowerCase();
+        if (renderer !== 'pdfium' && renderer !== 'pdfjs') {
+            console.error(`错误：不支持的渲染器 "${options.renderer}"。支持的渲染器：pdfium, pdfjs`);
+            process.exit(1);
+        }
+
+        // 检查渲染器可用性
+        if (!isAvailable(renderer)) {
+            if (renderer === 'pdfium') {
+                console.error('错误：PDFium 原生渲染器不可用。');
+                console.error('请确保 PDFium 库已正确安装，或使用 --renderer pdfjs 切换到 PDF.js 渲染器。');
+            } else {
+                console.error('错误：PDF.js 渲染器不可用。');
+            }
             process.exit(1);
         }
 
@@ -111,17 +128,15 @@ program
 
         // 仅显示 PDF 信息
         if (options.info) {
-            if (isUrl) {
-                console.error('错误：--info 选项仅支持本地文件');
-                process.exit(1);
-            }
-
             try {
-                const pageCount = getPageCount(input);
-                const stat = fs.statSync(input);
-                console.log(`文件: ${path.basename(input)}`);
-                console.log(`大小: ${(stat.size / 1024 / 1024).toFixed(2)} MB`);
+                const pageCount = await getPageCount(input, { renderer });
+                if (!isUrl) {
+                    const stat = fs.statSync(input);
+                    console.log(`文件: ${path.basename(input)}`);
+                    console.log(`大小: ${(stat.size / 1024 / 1024).toFixed(2)} MB`);
+                }
                 console.log(`页数: ${pageCount}`);
+                console.log(`渲染器: ${renderer}`);
             } catch (err) {
                 console.error(`错误: ${err.message}`);
                 process.exit(1);
@@ -143,6 +158,7 @@ program
             targetWidth: parseInt(options.width, 10),
             quality: parseInt(options.quality, 10),
             format: format,
+            renderer: renderer,
         };
 
         // COS 模式
@@ -195,7 +211,7 @@ program
 
             const duration = Date.now() - startTime;
 
-            spinner.succeed(`${modeText}完成 ${result.renderedPages}/${result.numPages} 页，格式: ${result.format.toUpperCase()}，耗时 ${duration}ms`);
+            spinner.succeed(`${modeText}完成 ${result.renderedPages}/${result.numPages} 页，格式: ${result.format.toUpperCase()}，渲染器: ${result.renderer}，耗时 ${duration}ms`);
 
             // 显示结果
             if (options.cos) {

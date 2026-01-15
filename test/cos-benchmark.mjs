@@ -3,19 +3,31 @@
  * COS 流式渲染性能测试脚本
  * 
  * 测试从腾讯云 COS 通过 HTTP Range 请求流式渲染 PDF
- * 对比流式渲染 vs 完整下载渲染的性能
+ * 对比 PDFium vs PDF.js 渲染器的性能
  */
 
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { convert, isAvailable, getVersion, getThreadPoolStats, destroyThreadPool } from '../packages/pdf2img/src/index.js';
+import { 
+    convert, 
+    isAvailable, 
+    getVersion, 
+    getThreadPoolStats, 
+    destroyThreadPool, 
+    RendererType,
+    isPdfjsAvailable,
+    getPdfjsVersion,
+} from '../packages/pdf2img/src/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUTPUT_DIR = path.join(__dirname, '../output/cos-benchmark');
 
 // 每个文件最多渲染的页数
 const MAX_PAGES_TO_RENDER = 5;
+
+// 要测试的渲染器列表
+const RENDERERS_TO_TEST = [RendererType.PDFIUM, RendererType.PDFJS];
 
 // COS 测试文件列表
 const COS_FILES = [
@@ -132,17 +144,33 @@ async function testRangeSupport(url) {
 
 async function runBenchmark() {
     console.log('='.repeat(70));
-    console.log('COS 流式渲染性能测试 (PDFium + Sharp)');
+    console.log('COS 流式渲染性能测试 - PDFium vs PDF.js 对比');
     console.log('='.repeat(70));
 
-    // 检查渲染器
-    if (!isAvailable()) {
-        console.error('❌ 原生渲染器不可用');
+    // 检查渲染器可用性
+    const pdfiumAvailable = isAvailable();
+    const pdfjsAvailable = isPdfjsAvailable();
+    
+    console.log();
+    console.log('🔧 渲染器状态:');
+    console.log(`   PDFium: ${pdfiumAvailable ? `✓ 可用 (${getVersion()})` : '✗ 不可用'}`);
+    console.log(`   PDF.js: ${pdfjsAvailable ? `✓ 可用 (${getPdfjsVersion()})` : '✗ 不可用'}`);
+    
+    // 过滤可用的渲染器
+    const availableRenderers = RENDERERS_TO_TEST.filter(r => {
+        if (r === RendererType.PDFIUM) return pdfiumAvailable;
+        if (r === RendererType.PDFJS) return pdfjsAvailable;
+        return false;
+    });
+    
+    if (availableRenderers.length === 0) {
+        console.error('❌ 没有可用的渲染器');
         process.exit(1);
     }
-    console.log(`渲染器版本: ${getVersion()}`);
-    console.log(`最大渲染页数: ${MAX_PAGES_TO_RENDER}`);
-    console.log(`测试文件数: ${COS_FILES.length}`);
+    
+    console.log(`   测试渲染器: ${availableRenderers.join(', ')}`);
+    console.log(`   最大渲染页数: ${MAX_PAGES_TO_RENDER}`);
+    console.log(`   测试文件数: ${COS_FILES.length}`);
     console.log();
 
     // 测试第一个文件的 Range 支持
@@ -156,107 +184,77 @@ async function runBenchmark() {
         fs.mkdirSync(OUTPUT_DIR, { recursive: true });
     }
 
-    const results = [];
+    // 存储所有测试结果，按渲染器分组
+    const allResults = {};
+    for (const renderer of availableRenderers) {
+        allResults[renderer] = [];
+    }
 
+    // 对每个文件，使用所有可用的渲染器进行测试
     for (const pdfFile of COS_FILES) {
         console.log(`📄 ${pdfFile.name}`);
         console.log(`   大小: ${formatSize(pdfFile.fileSize)}`);
-        console.log(`   FileID: ${pdfFile.fileId}`);
 
-        const fileResults = { 
-            file: pdfFile.name, 
-            fileId: pdfFile.fileId,
-            fileSize: pdfFile.fileSize, 
-            results: {},
-        };
-
-        try {
-            // 生成页码数组
-            const pages = Array.from({ length: MAX_PAGES_TO_RENDER }, (_, i) => i + 1);
-
-            const startTime = performance.now();
-            const result = await convert(pdfFile.publicUrl, {
-                pages,
-                outputType: 'buffer',
-                format: 'png',
-                targetWidth: 1280,
-            });
-            const endTime = performance.now();
-
-            const totalTime = endTime - startTime;
-            const avgTimePerPage = totalTime / result.renderedPages;
-
-            // 计算输出大小
-            const totalOutputSize = result.pages.reduce((sum, p) => sum + (p.size || 0), 0);
-
-            fileResults.results = {
-                success: true,
-                totalTime,
-                avgTimePerPage,
-                numPages: result.numPages,
-                renderedPages: result.renderedPages,
-                outputSize: totalOutputSize,
-                useStream: !!result.streamStats,
-                streamStats: result.streamStats,
+        for (const renderer of availableRenderers) {
+            const rendererIcon = renderer === RendererType.PDFIUM ? '🔷' : '🟠';
+            const fileResults = { 
+                file: pdfFile.name, 
+                fileId: pdfFile.fileId,
+                fileSize: pdfFile.fileSize,
+                renderer,
+                results: {},
             };
 
-            const streamIcon = result.streamStats ? '🌊' : '📥';
-            console.log(`   ${streamIcon} 总耗时: ${formatTime(totalTime)}, 平均: ${formatTime(avgTimePerPage)}/页`);
-            console.log(`   📊 总页数: ${result.numPages}, 渲染: ${result.renderedPages} 页, 输出: ${formatSize(totalOutputSize)}`);
-            
-            if (result.streamStats) {
-                console.log(`   🔗 流式渲染, 缓存命中: ${result.streamStats.cacheHits || 0}`);
+            try {
+                // 生成页码数组
+                const pages = Array.from({ length: MAX_PAGES_TO_RENDER }, (_, i) => i + 1);
+
+                const startTime = performance.now();
+                const result = await convert(pdfFile.publicUrl, {
+                    pages,
+                    outputType: 'buffer',
+                    format: 'png',
+                    targetWidth: 1280,
+                    renderer,
+                });
+                const endTime = performance.now();
+
+                const totalTime = endTime - startTime;
+                const avgTimePerPage = totalTime / result.renderedPages;
+
+                // 计算输出大小
+                const totalOutputSize = result.pages.reduce((sum, p) => sum + (p.size || 0), 0);
+
+                fileResults.results = {
+                    success: true,
+                    totalTime,
+                    avgTimePerPage,
+                    numPages: result.numPages,
+                    renderedPages: result.renderedPages,
+                    outputSize: totalOutputSize,
+                    useStream: !!result.streamStats,
+                    streamStats: result.streamStats,
+                };
+
+                const streamIcon = result.streamStats ? '🌊' : '📥';
+                console.log(`   ${rendererIcon} [${renderer.padEnd(6)}] ${streamIcon} 耗时: ${formatTime(totalTime).padEnd(10)} 平均: ${formatTime(avgTimePerPage)}/页  渲染: ${result.renderedPages}/${result.numPages}页`);
+
+            } catch (err) {
+                fileResults.results = {
+                    success: false,
+                    error: err.message,
+                };
+                console.log(`   ${rendererIcon} [${renderer.padEnd(6)}] ❌ 失败: ${err.message}`);
             }
 
-        } catch (err) {
-            fileResults.results = {
-                success: false,
-                error: err.message,
-            };
-            console.log(`   ❌ 失败: ${err.message}`);
+            allResults[renderer].push(fileResults);
         }
 
-        results.push(fileResults);
         console.log();
     }
 
     // 输出汇总表格
-    console.log('='.repeat(70));
-    console.log('性能汇总');
-    console.log('='.repeat(70));
-    console.log();
-
-    // 表头
-    console.log('| 文件名 | 大小 | 总页数 | 渲染页 | 耗时 | 平均/页 | 模式 |');
-    console.log('|--------|------|--------|--------|------|---------|------|');
-
-    for (const r of results) {
-        const fileName = r.file.length > 25 ? r.file.slice(0, 22) + '...' : r.file;
-        
-        if (r.results.success) {
-            const mode = r.results.useStream ? '流式' : '下载';
-            console.log(`| ${fileName.padEnd(25)} | ${formatSize(r.fileSize).padEnd(8)} | ${String(r.results.numPages).padEnd(6)} | ${String(r.results.renderedPages).padEnd(6)} | ${formatTime(r.results.totalTime).padEnd(8)} | ${formatTime(r.results.avgTimePerPage).padEnd(8)} | ${mode} |`);
-        } else {
-            console.log(`| ${fileName.padEnd(25)} | ${formatSize(r.fileSize).padEnd(8)} | - | - | 失败 | - | - |`);
-        }
-    }
-
-    // 统计
-    const successResults = results.filter(r => r.results.success);
-    const streamResults = successResults.filter(r => r.results.useStream);
-    
-    console.log();
-    console.log('📊 统计:');
-    console.log(`   成功: ${successResults.length}/${results.length}`);
-    console.log(`   流式渲染: ${streamResults.length}/${successResults.length}`);
-    
-    if (successResults.length > 0) {
-        const totalTime = successResults.reduce((sum, r) => sum + r.results.totalTime, 0);
-        const totalPages = successResults.reduce((sum, r) => sum + r.results.renderedPages, 0);
-        console.log(`   总渲染页数: ${totalPages}`);
-        console.log(`   总耗时: ${formatTime(totalTime)}`);
-        console.log(`   平均每页: ${formatTime(totalTime / totalPages)}`);
-    }
+    printSummary(allResults, availableRenderers);
 
     // 获取线程池统计
     const poolStats = getThreadPoolStats();
@@ -274,7 +272,134 @@ async function runBenchmark() {
     // 销毁线程池
     await destroyThreadPool();
 
-    return results;
+    return allResults;
+}
+
+/**
+ * 打印汇总表格和对比分析
+ */
+function printSummary(allResults, renderers) {
+    console.log('='.repeat(70));
+    console.log('性能汇总');
+    console.log('='.repeat(70));
+    console.log();
+
+    // 按渲染器输出表格
+    for (const renderer of renderers) {
+        const results = allResults[renderer];
+        const rendererIcon = renderer === RendererType.PDFIUM ? '🔷' : '🟠';
+        console.log(`${rendererIcon} ${renderer.toUpperCase()} 渲染器:`);
+        console.log();
+        console.log('| 文件名 | 大小 | 总页数 | 渲染页 | 耗时 | 平均/页 | 模式 |');
+        console.log('|--------|------|--------|--------|------|---------|------|');
+
+        for (const r of results) {
+            const fileName = r.file.length > 25 ? r.file.slice(0, 22) + '...' : r.file;
+            
+            if (r.results.success) {
+                const mode = r.results.useStream ? '流式' : '下载';
+                console.log(`| ${fileName.padEnd(25)} | ${formatSize(r.fileSize).padEnd(8)} | ${String(r.results.numPages).padEnd(6)} | ${String(r.results.renderedPages).padEnd(6)} | ${formatTime(r.results.totalTime).padEnd(8)} | ${formatTime(r.results.avgTimePerPage).padEnd(8)} | ${mode} |`);
+            } else {
+                console.log(`| ${fileName.padEnd(25)} | ${formatSize(r.fileSize).padEnd(8)} | - | - | 失败 | - | - |`);
+            }
+        }
+
+        // 统计
+        const successResults = results.filter(r => r.results.success);
+        const streamResults = successResults.filter(r => r.results.useStream);
+        
+        console.log();
+        console.log(`📊 ${renderer} 统计:`);
+        console.log(`   成功: ${successResults.length}/${results.length}`);
+        console.log(`   流式渲染: ${streamResults.length}/${successResults.length}`);
+        
+        if (successResults.length > 0) {
+            const totalTime = successResults.reduce((sum, r) => sum + r.results.totalTime, 0);
+            const totalPages = successResults.reduce((sum, r) => sum + r.results.renderedPages, 0);
+            console.log(`   总渲染页数: ${totalPages}`);
+            console.log(`   总耗时: ${formatTime(totalTime)}`);
+            console.log(`   平均每页: ${formatTime(totalTime / totalPages)}`);
+        }
+        console.log();
+    }
+
+    // 如果两个渲染器都有结果，输出对比分析
+    if (renderers.length >= 2 && allResults[RendererType.PDFIUM] && allResults[RendererType.PDFJS]) {
+        printComparison(allResults);
+    }
+}
+
+/**
+ * 打印 PDFium vs PDF.js 对比分析
+ */
+function printComparison(allResults) {
+    console.log('='.repeat(70));
+    console.log('🔷 PDFium vs 🟠 PDF.js 性能对比');
+    console.log('='.repeat(70));
+    console.log();
+
+    const pdfiumResults = allResults[RendererType.PDFIUM];
+    const pdfjsResults = allResults[RendererType.PDFJS];
+
+    console.log('| 文件名 | 大小 | PDFium | PDF.js | 差异 | 更快 |');
+    console.log('|--------|------|--------|--------|------|------|');
+
+    let pdfiumWins = 0;
+    let pdfjsWins = 0;
+    let totalPdfiumTime = 0;
+    let totalPdfjsTime = 0;
+    let bothSuccess = 0;
+
+    for (let i = 0; i < pdfiumResults.length; i++) {
+        const pdfium = pdfiumResults[i];
+        const pdfjs = pdfjsResults[i];
+        const fileName = pdfium.file.length > 25 ? pdfium.file.slice(0, 22) + '...' : pdfium.file;
+
+        if (pdfium.results.success && pdfjs.results.success) {
+            bothSuccess++;
+            const pdfiumTime = pdfium.results.totalTime;
+            const pdfjsTime = pdfjs.results.totalTime;
+            totalPdfiumTime += pdfiumTime;
+            totalPdfjsTime += pdfjsTime;
+
+            const diff = ((pdfjsTime - pdfiumTime) / pdfiumTime * 100).toFixed(0);
+            const diffSign = pdfjsTime > pdfiumTime ? '+' : '';
+            const winner = pdfiumTime <= pdfjsTime ? '🔷' : '🟠';
+            
+            if (pdfiumTime <= pdfjsTime) {
+                pdfiumWins++;
+            } else {
+                pdfjsWins++;
+            }
+
+            console.log(`| ${fileName.padEnd(25)} | ${formatSize(pdfium.fileSize).padEnd(8)} | ${formatTime(pdfiumTime).padEnd(8)} | ${formatTime(pdfjsTime).padEnd(8)} | ${(diffSign + diff + '%').padEnd(6)} | ${winner} |`);
+        } else {
+            const pdfiumStatus = pdfium.results.success ? formatTime(pdfium.results.totalTime) : '失败';
+            const pdfjsStatus = pdfjs.results.success ? formatTime(pdfjs.results.totalTime) : '失败';
+            console.log(`| ${fileName.padEnd(25)} | ${formatSize(pdfium.fileSize).padEnd(8)} | ${pdfiumStatus.padEnd(8)} | ${pdfjsStatus.padEnd(8)} | - | - |`);
+        }
+    }
+
+    console.log();
+    console.log('📊 对比总结:');
+    console.log(`   可对比文件: ${bothSuccess}/${pdfiumResults.length}`);
+    console.log(`   PDFium 更快: ${pdfiumWins} 次`);
+    console.log(`   PDF.js 更快: ${pdfjsWins} 次`);
+    
+    if (bothSuccess > 0) {
+        const overallDiff = ((totalPdfjsTime - totalPdfiumTime) / totalPdfiumTime * 100).toFixed(1);
+        const overallSign = totalPdfjsTime > totalPdfiumTime ? '+' : '';
+        console.log(`   PDFium 总耗时: ${formatTime(totalPdfiumTime)}`);
+        console.log(`   PDF.js 总耗时: ${formatTime(totalPdfjsTime)} (${overallSign}${overallDiff}%)`);
+        
+        if (totalPdfiumTime < totalPdfjsTime) {
+            const ratio = (totalPdfjsTime / totalPdfiumTime).toFixed(2);
+            console.log(`   🏆 PDFium 整体快 ${ratio}x`);
+        } else {
+            const ratio = (totalPdfiumTime / totalPdfjsTime).toFixed(2);
+            console.log(`   🏆 PDF.js 整体快 ${ratio}x`);
+        }
+    }
 }
 
 // 运行测试

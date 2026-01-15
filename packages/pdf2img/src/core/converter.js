@@ -7,6 +7,10 @@
  * - 主线程：负责 I/O、任务分发、结果收集
  * - 工作线程池：负责 CPU 密集型任务（PDFium 渲染 + Sharp 编码）
  * 
+ * 渲染器支持：
+ * - pdfium: PDFium 原生渲染器（默认，高性能）
+ * - pdfjs: PDF.js 渲染器（纯 JavaScript，无需原生依赖）
+ * 
  * 性能优化：
  * - 使用 piscina 线程池，充分利用多核 CPU
  * - 异步文件 I/O，不阻塞事件循环
@@ -16,12 +20,13 @@
 
 import fs from 'fs';
 import { createLogger } from '../utils/logger.js';
-import { RENDER_CONFIG, SUPPORTED_FORMATS } from './config.js';
+import { RENDER_CONFIG, SUPPORTED_FORMATS, RendererType, DEFAULT_RENDERER } from './config.js';
 import * as nativeRenderer from '../renderers/native.js';
+import * as pdfjsRenderer from '../renderers/pdfjs.js';
 import { getThreadCount, getThreadPoolStats, destroyThreadPool } from './thread-pool.js';
 import { downloadToTempFile } from './downloader.js';
 import { saveToFiles, uploadToCos, DEFAULT_CONCURRENCY } from './output-handler.js';
-import { InputType, detectInputType, renderPages } from './renderer.js';
+import { InputType, detectInputType, renderPages, getRendererType } from './renderer.js';
 
 const logger = createLogger('Converter');
 
@@ -48,6 +53,7 @@ export { InputType };
  * @param {string} [options.prefix='page'] - 输出文件名前缀
  * @param {string} [options.format='webp'] - 输出格式：'webp'、'png'、'jpg'
  * @param {number} [options.quality] - 图片质量（0-100，用于 webp 和 jpg）
+ * @param {string} [options.renderer='pdfium'] - 渲染器：'pdfium'（默认）或 'pdfjs'
  * @param {Object} [options.webp] - WebP 编码配置
  * @param {number} [options.webp.quality] - WebP 质量（0-100，默认 80）
  * @param {number} [options.webp.method] - WebP 编码方法（0-6，默认 4，0最快6最慢）
@@ -70,6 +76,7 @@ export async function convert(input, options = {}) {
         outputDir,
         prefix = 'page',
         format = RENDER_CONFIG.OUTPUT_FORMAT,
+        renderer = DEFAULT_RENDERER,
         cos: cosConfig,
         cosKeyPrefix = `pdf2img/${Date.now()}`,
         concurrency,
@@ -82,9 +89,13 @@ export async function convert(input, options = {}) {
         throw new Error(`Unsupported format: ${format}. Supported formats: ${SUPPORTED_FORMATS.join(', ')}`);
     }
 
+    // 获取实际使用的渲染器
+    const actualRenderer = getRendererType({ renderer });
+    logger.debug(`Renderer: ${actualRenderer}`);
+
     // 检查渲染器可用性
-    if (!nativeRenderer.isNativeAvailable()) {
-        throw new Error('Native renderer is not available. Please ensure PDFium library is installed.');
+    if (actualRenderer === RendererType.PDFIUM && !nativeRenderer.isNativeAvailable()) {
+        throw new Error('Native renderer is not available. Please ensure PDFium library is installed or use renderer: "pdfjs".');
     }
 
     // 检测输入类型
@@ -101,6 +112,7 @@ export async function convert(input, options = {}) {
         pngCompression: renderOptions.png?.compressionLevel,
         targetWidth: renderOptions.targetWidth,
         detectScan: renderOptions.detectScan,
+        renderer: actualRenderer,
     };
 
     // 使用线程池渲染页面
@@ -186,6 +198,7 @@ export async function convert(input, options = {}) {
         numPages: result.numPages,
         renderedPages: outputResult.filter(p => p.success).length,
         format: normalizedFormat,
+        renderer: result.renderer || actualRenderer,
         pages: outputResult,
         timing: {
             total: Date.now() - startTime,
@@ -204,9 +217,34 @@ export async function convert(input, options = {}) {
  * 获取 PDF 页数（异步版本）
  *
  * @param {string|Buffer} input - PDF 输入（文件路径、URL 或 Buffer）
+ * @param {Object} [options] - 选项
+ * @param {string} [options.renderer] - 渲染器：'pdfium' 或 'pdfjs'
  * @returns {Promise<number>} 页数
  */
-export async function getPageCount(input) {
+export async function getPageCount(input, options = {}) {
+    const rendererType = getRendererType(options);
+    
+    // 使用 PDF.js 渲染器
+    if (rendererType === RendererType.PDFJS) {
+        if (Buffer.isBuffer(input)) {
+            return pdfjsRenderer.getPageCount(input);
+        }
+        if (typeof input === 'string') {
+            if (input.startsWith('http://') || input.startsWith('https://')) {
+                // URL 输入需要下载
+                const tempFile = await downloadToTempFile(input);
+                try {
+                    return pdfjsRenderer.getPageCountFromFile(tempFile);
+                } finally {
+                    try { await fs.promises.unlink(tempFile); } catch {}
+                }
+            }
+            return pdfjsRenderer.getPageCountFromFile(input);
+        }
+        throw new Error('Invalid input: must be a file path, URL, or Buffer');
+    }
+    
+    // 使用 PDFium 渲染器
     if (!nativeRenderer.isNativeAvailable()) {
         throw new Error('Native renderer is not available');
     }
@@ -216,23 +254,15 @@ export async function getPageCount(input) {
     }
     
     if (typeof input === 'string') {
-        // 检查是否是 URL
         if (input.startsWith('http://') || input.startsWith('https://')) {
-            // URL 输入：下载到临时文件后获取页数
             const tempFile = await downloadToTempFile(input);
             try {
                 return nativeRenderer.getPageCountFromFile(tempFile);
             } finally {
-                // 清理临时文件
-                try {
-                    await fs.promises.unlink(tempFile);
-                } catch {
-                    // 忽略清理错误
-                }
+                try { await fs.promises.unlink(tempFile); } catch {}
             }
         }
         
-        // 本地文件路径
         try {
             await fs.promises.access(input, fs.constants.R_OK);
         } catch {
@@ -268,17 +298,37 @@ export function getPageCountSync(input) {
 
 /**
  * 检查渲染器是否可用
+ * 
+ * @param {string} [renderer] - 渲染器类型：'pdfium' 或 'pdfjs'
+ * @returns {boolean} 是否可用
  */
-export function isAvailable() {
-    return nativeRenderer.isNativeAvailable();
+export function isAvailable(renderer) {
+    if (renderer === RendererType.PDFJS) {
+        return pdfjsRenderer.isPdfjsAvailable();
+    }
+    if (renderer === RendererType.PDFIUM) {
+        return nativeRenderer.isNativeAvailable();
+    }
+    // 默认检查 pdfium，如果不可用则检查 pdfjs
+    return nativeRenderer.isNativeAvailable() || pdfjsRenderer.isPdfjsAvailable();
 }
 
 /**
  * 获取版本信息
+ * 
+ * @param {string} [renderer] - 渲染器类型
+ * @returns {string} 版本信息
  */
-export function getVersion() {
-    return nativeRenderer.getVersion();
+export function getVersion(renderer) {
+    if (renderer === RendererType.PDFJS) {
+        return pdfjsRenderer.getPdfjsVersion();
+    }
+    if (nativeRenderer.isNativeAvailable()) {
+        return nativeRenderer.getVersion();
+    }
+    return pdfjsRenderer.getPdfjsVersion();
 }
 
-// 重新导出线程池相关函数
+// 重新导出渲染器类型和线程池相关函数
+export { RendererType };
 export { getThreadPoolStats, destroyThreadPool };

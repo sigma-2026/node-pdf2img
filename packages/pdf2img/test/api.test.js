@@ -195,4 +195,72 @@ describe('PDF2IMG API 测试', () => {
             );
         });
     });
+
+    describe('PDF.js 渲染器', () => {
+        it('RendererType 应该正确导出', () => {
+            assert.ok(pdf2img.RendererType, 'RendererType 应该存在');
+            assert.strictEqual(pdf2img.RendererType.PDFIUM, 'pdfium');
+            assert.strictEqual(pdf2img.RendererType.PDFJS, 'pdfjs');
+        });
+
+        it('isPdfjsAvailable 应该返回布尔值', () => {
+            const available = pdf2img.isPdfjsAvailable();
+            assert.ok(typeof available === 'boolean');
+        });
+
+        it('应该使用 PDF.js 成功转换', async () => {
+            if (!pdf2img.isPdfjsAvailable()) {
+                console.log('跳过: PDF.js 不可用');
+                return;
+            }
+            if (!fs.existsSync(TEST_PDF)) {
+                console.log(`跳过: 测试文件不存在 ${TEST_PDF}`);
+                return;
+            }
+
+            const result = await pdf2img.convert(TEST_PDF, {
+                pages: [1],
+                renderer: 'pdfjs',
+            });
+
+            assert.ok(result.success);
+            assert.strictEqual(result.renderer, 'pdfjs');
+            assert.ok(result.pages.length > 0);
+        });
+
+        it('PDF.js 应该支持 Buffer 输入', async () => {
+            if (!pdf2img.isPdfjsAvailable()) {
+                console.log('跳过: PDF.js 不可用');
+                return;
+            }
+            if (!fs.existsSync(TEST_PDF)) {
+                console.log(`跳过: 测试文件不存在 ${TEST_PDF}`);
+                return;
+            }
+
+            const buffer = fs.readFileSync(TEST_PDF);
+            const result = await pdf2img.convert(buffer, {
+                pages: [1],
+                renderer: 'pdfjs',
+            });
+
+            assert.ok(result.success);
+            assert.strictEqual(result.renderer, 'pdfjs');
+        });
+
+        it('PDF.js getPageCount 应该返回正确页数', async () => {
+            if (!pdf2img.isPdfjsAvailable()) {
+                console.log('跳过: PDF.js 不可用');
+                return;
+            }
+            if (!fs.existsSync(TEST_PDF)) {
+                console.log(`跳过: 测试文件不存在 ${TEST_PDF}`);
+                return;
+            }
+
+            const count = await pdf2img.getPageCount(TEST_PDF, { renderer: 'pdfjs' });
+            assert.ok(typeof count === 'number');
+            assert.ok(count > 0);
+        });
+    });
 });

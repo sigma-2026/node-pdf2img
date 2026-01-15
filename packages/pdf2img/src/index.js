@@ -1,15 +1,20 @@
 /**
  * @tencent/pdf2img - 高性能 PDF 转图片工具
  *
- * 使用 PDFium 原生渲染器实现最佳性能。
+ * 使用 PDFium 原生渲染器（默认）或 PDF.js 渲染器实现。
  *
  * @example
  * ```javascript
- * import { convert, getPageCount, isAvailable } from '@tencent/pdf2img';
+ * import { convert, getPageCount, isAvailable, RendererType } from '@tencent/pdf2img';
  *
- * // 转换 PDF 为图片（返回 Buffer）
+ * // 转换 PDF 为图片（返回 Buffer，使用默认 pdfium 渲染器）
  * const result = await convert('./document.pdf');
  * console.log(`转换了 ${result.renderedPages} 页`);
+ *
+ * // 使用 PDF.js 渲染器（无需原生依赖）
+ * const result = await convert('./document.pdf', {
+ *     renderer: 'pdfjs',  // 或 RendererType.PDFJS
+ * });
  *
  * // 保存到文件
  * const result = await convert('./document.pdf', {
@@ -44,9 +49,10 @@ export {
     destroyThreadPool,
     InputType,
     OutputType,
+    RendererType,
 } from './core/converter.js';
 
-export { RENDER_CONFIG, TIMEOUT_CONFIG } from './core/config.js';
+export { RENDER_CONFIG, TIMEOUT_CONFIG, DEFAULT_RENDERER } from './core/config.js';
 
 // 导出原生渲染器工具供高级用法
 export {
@@ -56,3 +62,11 @@ export {
     renderPageToRawBitmap,
     renderPageToRawBitmapFromBuffer,
 } from './renderers/native.js';
+
+// 导出 PDF.js 渲染器
+export {
+    isPdfjsAvailable,
+    getPdfjsVersion,
+    getPageCount as getPageCountPdfjs,
+    getPageCountFromFile as getPageCountFromFilePdfjs,
+} from './renderers/pdfjs.js';

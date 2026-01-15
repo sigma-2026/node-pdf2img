@@ -2,11 +2,16 @@
  * PDF 渲染模块
  * 
  * 负责 PDF 页面的渲染逻辑，支持本地文件、Buffer 和 URL 输入
+ * 支持两种渲染器：
+ * - pdfium: PDFium 原生渲染器（默认，高性能）
+ * - pdfjs: PDF.js 渲染器（纯 JavaScript，无需原生依赖）
  */
 
 import fs from 'fs';
 import { createLogger } from '../utils/logger.js';
+import { RendererType, DEFAULT_RENDERER } from './config.js';
 import * as nativeRenderer from '../renderers/native.js';
+import * as pdfjsRenderer from '../renderers/pdfjs.js';
 import { getThreadPool, getThreadCount } from './thread-pool.js';
 import { getRemoteFileSize, downloadToTempFile } from './downloader.js';
 
@@ -46,9 +51,30 @@ export function detectInputType(input) {
 }
 
 /**
- * 使用线程池渲染 PDF 页面
+ * 获取当前使用的渲染器类型
  * 
- * 主线程负责协调，工作线程负责 CPU 密集型任务
+ * @param {Object} options - 选项
+ * @returns {string} 渲染器类型
+ */
+export function getRendererType(options = {}) {
+    const renderer = options.renderer || DEFAULT_RENDERER;
+    
+    // 验证渲染器类型
+    if (renderer === RendererType.PDFJS) {
+        return RendererType.PDFJS;
+    }
+    
+    // 默认使用 pdfium，如果不可用则回退到 pdfjs
+    if (!nativeRenderer.isNativeAvailable()) {
+        logger.warn('PDFium 渲染器不可用，回退到 PDF.js');
+        return RendererType.PDFJS;
+    }
+    
+    return RendererType.PDFIUM;
+}
+
+/**
+ * 使用指定渲染器渲染 PDF 页面
  * 
  * @param {string|Buffer} input - 输入
  * @param {string} inputType - 输入类型
@@ -58,14 +84,50 @@ export function detectInputType(input) {
  */
 export async function renderPages(input, inputType, pages, options) {
     const startTime = Date.now();
-
-    // URL 输入：优先使用流式渲染
+    const rendererType = getRendererType(options);
+    
+    logger.debug(`Using renderer: ${rendererType}`);
+    
+    if (rendererType === RendererType.PDFJS) {
+        return renderPagesWithPdfjs(input, inputType, pages, options, startTime);
+    }
+    
+    // 使用 pdfium 渲染器
     if (inputType === InputType.URL) {
         return renderPagesFromUrl(input, pages, options, startTime);
     }
-
-    // 本地文件或 Buffer 输入：使用线程池渲染
+    
     return renderPagesFromLocal(input, inputType, pages, options, startTime);
+}
+
+/**
+ * 使用 PDF.js 渲染器渲染 PDF 页面
+ */
+async function renderPagesWithPdfjs(input, inputType, pages, options, startTime) {
+    let result;
+    
+    if (inputType === InputType.URL) {
+        result = await pdfjsRenderer.renderFromUrl(input, pages, options);
+    } else if (inputType === InputType.BUFFER) {
+        result = await pdfjsRenderer.renderFromBuffer(input, pages, options);
+    } else {
+        result = await pdfjsRenderer.renderFromFile(input, pages, options);
+    }
+    
+    if (!result.success) {
+        throw new Error(result.error || 'PDF.js 渲染失败');
+    }
+    
+    return {
+        success: true,
+        numPages: result.numPages,
+        pages: result.pages,
+        totalTime: Date.now() - startTime,
+        renderTime: result.renderTime || result.pages.reduce((sum, p) => sum + (p.renderTime || 0), 0),
+        encodeTime: result.pages.reduce((sum, p) => sum + (p.encodeTime || 0), 0),
+        renderer: RendererType.PDFJS,
+        streamStats: result.streamStats,
+    };
 }
 
 /**
@@ -97,6 +159,7 @@ async function renderPagesFromUrl(url, pages, options, startTime) {
             renderTime: result.pages.reduce((sum, p) => sum + (p.renderTime || 0), 0),
             encodeTime: result.pages.reduce((sum, p) => sum + (p.encodeTime || 0), 0),
             streamStats: result.streamStats,
+            renderer: RendererType.PDFIUM,
         };
     } catch (err) {
         // 流式渲染失败，回退到下载后渲染
@@ -145,6 +208,7 @@ async function renderPagesWithDownload(url, pages, options, startTime) {
             totalTime: Date.now() - startTime,
             renderTime: results.reduce((sum, p) => sum + (p.renderTime || 0), 0),
             encodeTime: results.reduce((sum, p) => sum + (p.encodeTime || 0), 0),
+            renderer: RendererType.PDFIUM,
         };
     } finally {
         try {
@@ -220,5 +284,6 @@ async function renderPagesFromLocal(input, inputType, pages, options, startTime)
         totalTime: Date.now() - startTime,
         renderTime: results.reduce((sum, p) => sum + (p.renderTime || 0), 0),
         encodeTime: results.reduce((sum, p) => sum + (p.encodeTime || 0), 0),
+        renderer: RendererType.PDFIUM,
     };
 }

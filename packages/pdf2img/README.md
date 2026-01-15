@@ -1,12 +1,13 @@
 # node-pdf2img
 
-高性能 PDF 转图片工具，基于 PDFium 原生渲染器 + Sharp 图像编码。
+高性能 PDF 转图片工具，支持 PDFium 原生渲染器和 PDF.js 渲染器。
 
 [![npm version](https://badge.fury.io/js/node-pdf2img.svg)](https://badge.fury.io/js/node-pdf2img)
 
 ## 特性
 
-- **高性能**：使用 PDFium 原生渲染，多线程并行处理
+- **双渲染引擎**：PDFium 原生渲染（高性能）+ PDF.js（纯 JavaScript，无需原生依赖）
+- **高性能**：PDFium 多线程并行处理，整体快 1.7x
 - **流式渲染**：URL 输入支持 HTTP Range 请求，大文件无需完整下载
 - **多种格式**：支持 WebP、PNG、JPG 输出
 - **多种输入**：支持本地文件、URL、Buffer
@@ -35,8 +36,11 @@ npm install -g node-pdf2img
 ## CLI 使用
 
 ```bash
-# 基本用法 - 转换所有页面
+# 基本用法 - 转换所有页面（默认使用 PDFium）
 pdf2img document.pdf -o ./output
+
+# 使用 PDF.js 渲染器
+pdf2img document.pdf -o ./output -r pdfjs
 
 # 转换指定页面
 pdf2img document.pdf -p 1,2,3 -o ./output
@@ -56,6 +60,9 @@ pdf2img document.pdf -f jpg -q 85 -o ./output
 # 显示 PDF 信息
 pdf2img document.pdf --info
 
+# 显示渲染器版本信息
+pdf2img --version-info
+
 # 上传到腾讯云 COS
 pdf2img document.pdf --cos --cos-prefix images/doc-123
 ```
@@ -69,8 +76,10 @@ pdf2img document.pdf --cos --cos-prefix images/doc-123
 | `-w, --width <width>` | 渲染宽度（像素） | `1920` |
 | `-q, --quality <quality>` | 图片质量（0-100） | `100` |
 | `-f, --format <format>` | 输出格式：webp, png, jpg | `webp` |
+| `-r, --renderer <renderer>` | 渲染器：pdfium, pdfjs | `pdfium` |
 | `--prefix <prefix>` | 文件名前缀 | `page` |
 | `--info` | 仅显示 PDF 信息 | |
+| `--version-info` | 显示渲染器版本信息 | |
 | `-v, --verbose` | 详细输出 | |
 | `--cos` | 上传到腾讯云 COS | |
 | `--cos-prefix <prefix>` | COS key 前缀 | |
@@ -93,7 +102,7 @@ pdf2img document.pdf --cos --cos-prefix images/doc-123
 ### 基本用法
 
 ```javascript
-import { convert, getPageCount, isAvailable } from 'node-pdf2img';
+import { convert, getPageCount, isAvailable, RendererType } from 'node-pdf2img';
 
 // 检查渲染器是否可用
 if (!isAvailable()) {
@@ -101,7 +110,7 @@ if (!isAvailable()) {
     process.exit(1);
 }
 
-// 转换 PDF 为图片（返回 Buffer）
+// 转换 PDF 为图片（返回 Buffer，默认使用 PDFium）
 const result = await convert('./document.pdf');
 console.log(`转换了 ${result.renderedPages} 页`);
 
@@ -110,6 +119,24 @@ for (const page of result.pages) {
     // page.buffer 包含图片数据
 }
 ```
+
+### 使用 PDF.js 渲染器
+
+```javascript
+import { convert, RendererType, isPdfjsAvailable } from 'node-pdf2img';
+
+// 检查 PDF.js 渲染器是否可用
+if (isPdfjsAvailable()) {
+    const result = await convert('./document.pdf', {
+        renderer: RendererType.PDFJS,  // 或直接使用 'pdfjs'
+    });
+    console.log(`使用 PDF.js 转换了 ${result.renderedPages} 页`);
+}
+```
+
+> **渲染器选择建议**：
+> - **PDFium**（默认）：高性能，适合大多数场景，整体快 1.7x
+> - **PDF.js**：纯 JavaScript，无需原生依赖，适合超大文件（>50MB）或无法使用原生模块的环境
 
 ### 保存到文件
 
@@ -268,6 +295,7 @@ PDF 转图片。
   - `prefix` (string)：文件名前缀，默认 'page'
   - `format` ('webp' | 'png' | 'jpg')：输出格式，默认 'webp'
   - `targetWidth` (number)：渲染宽度，默认 1280
+  - `renderer` ('pdfium' | 'pdfjs')：渲染器，默认 'pdfium'
   - `webp` (object)：WebP 编码选项
     - `quality` (number)：质量 0-100，默认 80
   - `jpeg` (object)：JPEG 编码选项
@@ -288,15 +316,30 @@ PDF 转图片。
 
 **返回：** Promise\<number\>
 
-### `isAvailable()`
+### `isAvailable(renderer?)`
 
-检查原生渲染器是否可用。
+检查渲染器是否可用。
+
+**参数：**
+- `renderer` ('pdfium' | 'pdfjs')：可选，指定检查的渲染器，默认检查 PDFium
+
+**返回：** boolean
+
+### `isPdfjsAvailable()`
+
+检查 PDF.js 渲染器是否可用。
 
 **返回：** boolean
 
 ### `getVersion()`
 
-获取原生渲染器版本信息。
+获取 PDFium 渲染器版本信息。
+
+**返回：** string
+
+### `getPdfjsVersion()`
+
+获取 PDF.js 渲染器版本信息。
 
 **返回：** string
 
@@ -311,20 +354,37 @@ PDF 转图片。
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `PDF2IMG_THREAD_COUNT` | 工作线程数 | CPU 核心数 |
+| `PDF2IMG_RENDERER` | 默认渲染器 (pdfium/pdfjs) | `pdfium` |
 | `PDF2IMG_DEBUG` | 启用调试日志 | `false` |
+
+## 渲染器对比
+
+| 特性 | PDFium | PDF.js |
+|------|--------|--------|
+| 性能 | ⚡ 快 1.7x | 普通 |
+| 依赖 | 原生模块 | 纯 JavaScript |
+| 大文件 (>50MB) | 普通 | ⚡ 更快 |
+| 兼容性 | Linux/macOS/Windows | 所有平台 |
+| 流式渲染 | ✓ | ✓ |
 
 ## 架构
 
 模块化设计，职责分离：
 
 ```
-src/core/
-├── converter.js      # 主 API 入口
-├── renderer.js       # PDF 渲染逻辑（流式/下载/本地）
-├── thread-pool.js    # 线程池管理
-├── downloader.js     # 远程文件下载
-├── output-handler.js # 文件保存和 COS 上传
-└── config.js         # 配置常量
+src/
+├── core/
+│   ├── converter.js      # 主 API 入口
+│   ├── renderer.js       # PDF 渲染逻辑（流式/下载/本地）
+│   ├── thread-pool.js    # 线程池管理
+│   ├── downloader.js     # 远程文件下载
+│   ├── output-handler.js # 文件保存和 COS 上传
+│   └── config.js         # 配置常量
+├── renderers/
+│   ├── native.js         # PDFium 原生渲染器
+│   └── pdfjs.js          # PDF.js 渲染器（分片加载）
+└── utils/
+    └── logger.js         # 日志工具
 ```
 
 ## 许可证

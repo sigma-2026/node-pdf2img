@@ -1,7 +1,7 @@
 {
     "name": "node-pdf2img",
     "version": "0.1.0",
-    "description": "High-performance PDF to image converter using PDFium native renderer",
+    "description": "High-performance PDF to image converter using PDFium native renderer or PDF.js",
     "type": "module",
     "main": "./src/index.js",
     "types": "./src/index.d.ts",
@@ -29,6 +29,7 @@
         "image",
         "converter",
         "pdfium",
+        "pdfjs",
         "webp",
         "native",
         "cli"
@@ -53,9 +54,13 @@
         "dotenv": "^16.0.3",
         "ora": "^8.0.0",
         "p-limit": "^7.2.0",
+        "pdfjs-dist": "^4.0.0",
         "piscina": "^5.1.4",
         "sharp": "^0.33.0",
         "node-pdf2img-native": "file:../native-renderer"
+    },
+    "optionalDependencies": {
+        "canvas": "^2.11.0"
     },
     "devDependencies": {
         "@types/node": "^20.0.0"

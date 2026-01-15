@@ -2,6 +2,15 @@
  * PDF2IMG 配置
  */
 
+// ==================== 渲染器类型 ====================
+export const RendererType = {
+    PDFIUM: 'pdfium',  // PDFium 原生渲染器（默认，高性能）
+    PDFJS: 'pdfjs',    // PDF.js 渲染器（纯 JavaScript，无需原生依赖）
+};
+
+// 默认渲染器
+export const DEFAULT_RENDERER = process.env.PDF2IMG_RENDERER || RendererType.PDFIUM;
+
 // ==================== 渲染配置 ====================
 export const RENDER_CONFIG = {
     // 目标渲染宽度（像素）
