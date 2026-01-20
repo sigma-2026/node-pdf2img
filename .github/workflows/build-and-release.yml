@@ -99,8 +99,17 @@ jobs:
         working-directory: packages/native-renderer
         run: |
           pnpm install --no-frozen-lockfile
-          # Use napi build with --zig flag to target GLIBC 2.17 (CentOS 7/RHEL 7 compatible)
-          pnpm run build -- --target ${{ matrix.target }} --zig
+          # Use napi build with --zig flag and explicit GLIBC 2.17 target
+          # Format: <arch>-<os>-<libc>.<glibc_version>
+          if [[ "${{ matrix.target }}" == "x86_64-unknown-linux-gnu" ]]; then
+            ZIG_TARGET="x86_64-unknown-linux-gnu.2.17"
+          elif [[ "${{ matrix.target }}" == "aarch64-unknown-linux-gnu" ]]; then
+            ZIG_TARGET="aarch64-unknown-linux-gnu.2.17"
+          else
+            ZIG_TARGET="${{ matrix.target }}"
+          fi
+          echo "Building with zig target: $ZIG_TARGET"
+          pnpm run build -- --target $ZIG_TARGET --zig
 
       - name: Build native module (standard)
         if: ${{ !matrix.use_zig }}
