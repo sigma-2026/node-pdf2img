@@ -1,0 +1,13 @@
+{
+  "name": "pdf2img-demo",
+  "version": "1.0.0",
+  "description": "node-pdf2img 使用示例",
+  "type": "module",
+  "scripts": {
+    "test": "node index.mjs",
+    "benchmark": "node benchmark.mjs"
+  },
+  "dependencies": {
+    "node-pdf2img": "^0.1.12"
+  }
+}
