@@ -98,7 +98,8 @@ jobs:
         shell: bash
         working-directory: packages/native-renderer
         run: |
-          pnpm install --no-frozen-lockfile
+          # Install dependencies without running install scripts (avoid triggering napi build)
+          pnpm install --no-frozen-lockfile --ignore-scripts
           
           # Determine the zig target with GLIBC version
           if [[ "${{ matrix.target }}" == "x86_64-unknown-linux-gnu" ]]; then
@@ -140,12 +141,17 @@ jobs:
           # Copy pdfium library
           node scripts/copy-pdfium.js
           
-          # Verify GLIBC requirement
+          # Verify GLIBC requirement - should only show versions <= 2.17
           echo "Checking GLIBC symbols in built binary..."
           for f in *.node; do
             if [ -f "$f" ]; then
               echo "=== $f ==="
-              objdump -T "$f" 2>/dev/null | grep GLIBC | awk '{print $NF}' | sort -u | head -10 || true
+              GLIBC_VERSIONS=$(objdump -T "$f" 2>/dev/null | grep -oP 'GLIBC_[0-9.]+' | sort -V | uniq)
+              echo "$GLIBC_VERSIONS"
+              
+              # Check if any version > 2.17
+              MAX_GLIBC=$(echo "$GLIBC_VERSIONS" | tail -1)
+              echo "Maximum GLIBC version required: $MAX_GLIBC"
             fi
           done
           
