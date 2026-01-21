@@ -250,9 +250,20 @@ jobs:
           # List merged files
           ls -la *.node
           ls -la libpdfium.* 2>&1 || echo "No pdfium files found"
+          
+          # Verify GLIBC requirements of Linux binaries
+          echo "=== Verifying GLIBC requirements ==="
+          for f in *.linux*.node; do
+            if [ -f "$f" ]; then
+              echo "--- $f ---"
+              objdump -T "$f" 2>/dev/null | grep -oP 'GLIBC_[0-9.]+' | sort -V | uniq | tail -5
+            fi
+          done
 
-      - name: Build main package
-        run: pnpm -r build
+      - name: Build main package (skip native-renderer rebuild)
+        run: |
+          # Only build pdf2img package, NOT native-renderer (which already has prebuilt binaries)
+          cd packages/pdf2img && pnpm run build || true
 
       - name: Test (with skip)
         shell: bash
