@@ -99,17 +99,46 @@ jobs:
         working-directory: packages/native-renderer
         run: |
           pnpm install --no-frozen-lockfile
-          # Use napi build with --zig flag and explicit GLIBC 2.17 target
-          # Format: <arch>-<os>-<libc>.<glibc_version>
+          
+          # Set the GLIBC version target
+          # napi-rs passes --target to cargo-zigbuild, which supports glibc version suffix
           if [[ "${{ matrix.target }}" == "x86_64-unknown-linux-gnu" ]]; then
-            ZIG_TARGET="x86_64-unknown-linux-gnu.2.17"
+            NAPI_TARGET="x86_64-unknown-linux-gnu.2.17"
           elif [[ "${{ matrix.target }}" == "aarch64-unknown-linux-gnu" ]]; then
-            ZIG_TARGET="aarch64-unknown-linux-gnu.2.17"
+            NAPI_TARGET="aarch64-unknown-linux-gnu.2.17"
           else
-            ZIG_TARGET="${{ matrix.target }}"
+            NAPI_TARGET="${{ matrix.target }}"
           fi
-          echo "Building with zig target: $ZIG_TARGET"
-          pnpm run build -- --target $ZIG_TARGET --zig
+          
+          echo "Building with target: $NAPI_TARGET (using --zig for GLIBC 2.17 compatibility)"
+          
+          # Use napi build with --zig flag and glibc version suffix
+          npx napi build --platform --release --zig --target $NAPI_TARGET
+          
+          # Copy pdfium library
+          node scripts/copy-pdfium.js
+          
+          # The output file will have the glibc suffix, need to rename it
+          # e.g., pdf-renderer.linux-x64-gnu.2.17.node -> pdf-renderer.linux-x64-gnu.node
+          for f in *.2.17.node; do
+            if [ -f "$f" ]; then
+              newname="${f/.2.17.node/.node}"
+              echo "Renaming $f -> $newname"
+              mv "$f" "$newname"
+            fi
+          done
+          
+          # Verify GLIBC requirement
+          echo "Checking GLIBC symbols in built binary..."
+          for f in *.node; do
+            if [ -f "$f" ]; then
+              echo "=== $f ==="
+              objdump -T "$f" 2>/dev/null | grep GLIBC | awk '{print $NF}' | sort -u | head -10 || true
+            fi
+          done
+          
+          # List all built files
+          ls -la *.node libpdfium*.so 2>/dev/null || true
 
       - name: Build native module (standard)
         if: ${{ !matrix.use_zig }}
