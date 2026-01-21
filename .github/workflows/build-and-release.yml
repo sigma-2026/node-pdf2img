@@ -100,33 +100,45 @@ jobs:
         run: |
           pnpm install --no-frozen-lockfile
           
-          # Set the GLIBC version target
-          # napi-rs passes --target to cargo-zigbuild, which supports glibc version suffix
+          # Determine the zig target with GLIBC version
           if [[ "${{ matrix.target }}" == "x86_64-unknown-linux-gnu" ]]; then
-            NAPI_TARGET="x86_64-unknown-linux-gnu.2.17"
+            ZIG_TARGET="x86_64-unknown-linux-gnu.2.17"
           elif [[ "${{ matrix.target }}" == "aarch64-unknown-linux-gnu" ]]; then
-            NAPI_TARGET="aarch64-unknown-linux-gnu.2.17"
+            ZIG_TARGET="aarch64-unknown-linux-gnu.2.17"
           else
-            NAPI_TARGET="${{ matrix.target }}"
+            ZIG_TARGET="${{ matrix.target }}"
           fi
           
-          echo "Building with target: $NAPI_TARGET (using --zig for GLIBC 2.17 compatibility)"
+          echo "Building with cargo zigbuild target: $ZIG_TARGET"
           
-          # Use napi build with --zig flag and glibc version suffix
-          npx napi build --platform --release --zig --target $NAPI_TARGET
+          # Build using cargo zigbuild directly (not through napi)
+          cargo zigbuild --release --target $ZIG_TARGET
+          
+          # The built library is in target/<target>/release/
+          # For cdylib, it's libpdf_renderer.so on Linux
+          BUILT_LIB="target/${{ matrix.target }}/release/libpdf_renderer.so"
+          
+          if [ -f "$BUILT_LIB" ]; then
+            echo "Found built library: $BUILT_LIB"
+            
+            # Copy to the expected napi output filename
+            # napi expects: pdf-renderer.linux-x64-gnu.node
+            if [[ "${{ matrix.target }}" == "x86_64-unknown-linux-gnu" ]]; then
+              OUTPUT_NAME="pdf-renderer.linux-x64-gnu.node"
+            elif [[ "${{ matrix.target }}" == "aarch64-unknown-linux-gnu" ]]; then
+              OUTPUT_NAME="pdf-renderer.linux-arm64-gnu.node"
+            fi
+            
+            cp "$BUILT_LIB" "$OUTPUT_NAME"
+            echo "Created: $OUTPUT_NAME"
+          else
+            echo "ERROR: Built library not found at $BUILT_LIB"
+            find target -name "*.so" -o -name "libpdf_renderer*" 2>/dev/null || true
+            exit 1
+          fi
           
           # Copy pdfium library
           node scripts/copy-pdfium.js
-          
-          # The output file will have the glibc suffix, need to rename it
-          # e.g., pdf-renderer.linux-x64-gnu.2.17.node -> pdf-renderer.linux-x64-gnu.node
-          for f in *.2.17.node; do
-            if [ -f "$f" ]; then
-              newname="${f/.2.17.node/.node}"
-              echo "Renaming $f -> $newname"
-              mv "$f" "$newname"
-            fi
-          done
           
           # Verify GLIBC requirement
           echo "Checking GLIBC symbols in built binary..."
