@@ -301,19 +301,31 @@ impl Read for JsFileStreamer {
         }
 
         let remaining = self.file_size - self.position;
-        let to_read = (buf.len() as u64).min(remaining) as u32;
+        let to_read = (buf.len() as u64).min(remaining) as usize;
 
         if to_read == 0 {
             return Ok(0);
         }
 
-        let data = self.fetch_block(self.position, to_read)?;
-        let bytes_read = data.len();
+        // 循环读取直到填满请求的数据，或者到达文件末尾
+        let mut total_read = 0;
+        
+        while total_read < to_read {
+            let current_size = (to_read - total_read) as u32;
+            let data = self.fetch_block(self.position, current_size)?;
+            
+            if data.is_empty() {
+                // 没有更多数据可读
+                break;
+            }
+            
+            let bytes_read = data.len();
+            buf[total_read..total_read + bytes_read].copy_from_slice(&data);
+            self.position += bytes_read as u64;
+            total_read += bytes_read;
+        }
 
-        buf[..bytes_read].copy_from_slice(&data);
-        self.position += bytes_read as u64;
-
-        Ok(bytes_read)
+        Ok(total_read)
     }
 }
 

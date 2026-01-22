@@ -8,6 +8,9 @@
     "benchmark": "node benchmark.mjs"
   },
   "dependencies": {
-    "node-pdf2img": "^0.1.12"
+    "node-pdf2img": "file:../packages/pdf2img"
+  },
+  "devDependencies": {
+    "pngjs": "^7.0.0"
   }
 }

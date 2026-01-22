@@ -22,7 +22,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUTPUT_DIR = path.join(__dirname, 'output');
 
 // 测试 PDF URL（可替换为本地文件路径或其他 URL）
-const TEST_PDF_URL = 'https://tdocs-cos-1257943044.cos-internal.ap-guangzhou.tencentcos.cn/uploads/pdf/2026-01-13/6ae95a47-d175-4e5b-8ecc-fee020d8a78c.pdf';
+const TEST_PDF_URL = 'https://tdocs-cos-1257943044.cos-internal.ap-guangzhou.tencentcos.cn/uploads/pdf/2026-01-22/882d094d-4936-4411-becc-1781e6955d28.pdf';
 
 async function main() {
     console.log('='.repeat(50));
