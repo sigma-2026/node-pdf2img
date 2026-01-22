@@ -1,182 +1,230 @@
-# PDF2IMG Monorepo
+# pdf2img
 
-高性能 PDF 转图片工具的 Monorepo 仓库。
+High-performance PDF to image converter using PDFium, written in pure Rust.
 
-## 项目结构
+## Features
+
+- **High Performance**: Uses PDFium for fast, accurate PDF rendering
+- **Multiple Formats**: Supports WebP, PNG, and JPEG output
+- **Streaming Mode**: HTTP Range request support for large remote PDFs
+- **Cross-Platform**: Works on Linux, macOS, and Windows
+- **Language Bindings**: Native Rust library with Go bindings via FFI
+
+## Installation
+
+### CLI Tool
+
+```bash
+cargo install pdf2img-cli
+```
+
+### Rust Library
+
+```toml
+[dependencies]
+pdf2img-core = "0.1"
+```
+
+### Go Module
+
+```bash
+go get github.com/nicepkg/pdf2img/go
+```
+
+## Usage
+
+### CLI
+
+```bash
+# Convert PDF to WebP images (default)
+pdf2img document.pdf -o output/
+
+# Convert specific pages
+pdf2img document.pdf -o output/ -p 1,2,3
+
+# Convert to PNG format
+pdf2img document.pdf -o output/ -f png
+
+# Convert from URL with streaming mode
+pdf2img https://example.com/doc.pdf -o output/ -m native-stream
+
+# Get PDF info only
+pdf2img document.pdf --info
+```
+
+### Rust API
+
+```rust
+use pdf2img_core::{convert, ConvertOptions, OutputFormat};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let options = ConvertOptions {
+        format: OutputFormat::WebP,
+        target_width: Some(1280),
+        quality: Some(80),
+        ..Default::default()
+    };
+    
+    let result = convert("document.pdf", Some(options)).await?;
+    
+    for page in result.pages {
+        if page.success {
+            std::fs::write(
+                format!("page_{}.webp", page.page_num),
+                &page.data
+            )?;
+        }
+    }
+    
+    Ok(())
+}
+```
+
+### Go API
+
+```go
+package main
+
+import (
+    "fmt"
+    "os"
+    
+    pdf2img "github.com/nicepkg/pdf2img/go"
+)
+
+func main() {
+    // Check if PDFium is available
+    if !pdf2img.IsAvailable() {
+        fmt.Println("PDFium not available")
+        os.Exit(1)
+    }
+
+    // Convert PDF to images
+    result, err := pdf2img.ConvertFile("document.pdf", &pdf2img.Options{
+        Format:      pdf2img.FormatWebP,
+        TargetWidth: 1280,
+        Quality:     80,
+    })
+    if err != nil {
+        fmt.Printf("Conversion failed: %v\n", err)
+        os.Exit(1)
+    }
+    defer result.Free()
+
+    // Save pages
+    for _, page := range result.Pages {
+        if page.Success {
+            filename := fmt.Sprintf("page_%d.webp", page.PageNum)
+            os.WriteFile(filename, page.Data, 0644)
+            fmt.Printf("Saved %s (%dx%d)\n", filename, page.Width, page.Height)
+        }
+    }
+}
+```
+
+## Render Modes
+
+| Mode | Description | Best For |
+|------|-------------|----------|
+| `native` | Load entire PDF into memory | Local files, small PDFs |
+| `native-stream` | Stream via HTTP Range requests | Large remote PDFs |
+
+## Output Formats
+
+| Format | Description |
+|--------|-------------|
+| WebP | Best compression, default format |
+| PNG | Lossless, supports transparency |
+| JPEG | Good for photos, smaller files |
+
+## Building from Source
+
+### Prerequisites
+
+- Rust 1.70+
+- PDFium library (automatically downloaded during build)
+
+### Build
+
+```bash
+# Build all crates
+cargo build --release
+
+# Build CLI only
+cargo build --release -p pdf2img-cli
+
+# Build FFI library (for Go bindings)
+cargo build --release -p pdf2img-ffi
+```
+
+### Run Tests
+
+```bash
+# Rust tests
+cargo test
+
+# Go tests (requires FFI library built)
+cd go && go test -v
+```
+
+### Benchmarks
+
+```bash
+# File benchmark
+cargo run --release --bin file-benchmark
+
+# Stream benchmark
+cargo run --release --bin stream-benchmark
+
+# Manual test
+cargo run --release --bin manual-test -- path/to/file.pdf
+```
+
+## Project Structure
 
 ```
 pdf2img/
-├── packages/
-│   ├── pdf2img/              # 主包 - CLI 和 Node.js API
-│   │   ├── bin/              # CLI 入口
-│   │   ├── src/              # 源代码
-│   │   │   ├── core/         # 核心转换逻辑
-│   │   │   ├── renderers/    # 渲染器适配层
-│   │   │   └── utils/        # 工具函数
-│   │   └── test/             # 测试文件
-│   └── native-renderer/      # 原生渲染器 - Rust + PDFium
-│       ├── src/              # Rust 源代码
-│       └── pdfium/           # PDFium 库文件
-├── static/                   # 测试用 PDF 文件
-├── .github/workflows/        # CI/CD 配置
-└── package.json              # Monorepo 根配置
+├── crates/
+│   ├── pdf2img-core/     # Core Rust library
+│   ├── pdf2img-cli/      # CLI tool
+│   └── pdf2img-ffi/      # C-FFI bindings
+├── go/                   # Go module bindings
+├── demo/go/              # Go demo project
+├── test/                 # Benchmark scripts
+├── static/               # Test PDF files
+└── output/               # Generated output
 ```
 
-## 开发环境设置
+## Go Demo
 
-### 前置要求
-
-- Node.js >= 18.0.0
-- pnpm >= 8.0.0
-- Rust（用于编译原生渲染器）
-
-### 安装依赖
+A demo project showing how to use the Go bindings:
 
 ```bash
-pnpm install
+# Build the FFI library first
+cargo build --release -p pdf2img-ffi
+
+# Build and run the demo
+cd demo/go
+go build -o pdf2img-demo .
+LD_LIBRARY_PATH=../../target/release ./pdf2img-demo
 ```
 
-### 构建原生渲染器
+## PDFium Installation
 
-```bash
-cd packages/native-renderer
-pnpm build
-```
+The library requires PDFium to be available. You can:
 
-## 开发命令
+1. **Set environment variable**: `PDFIUM_MODULE_DIR=/path/to/pdfium`
+2. **Place in executable directory**: Put the PDFium library next to the binary
+3. **System path**: Install PDFium in system library path
 
-```bash
-# 运行所有测试
-pnpm test
+PDFium library names by platform:
+- Linux x64: `libpdfium-linux-x64.so`
+- Linux ARM64: `libpdfium-linux-arm64.so`
+- macOS x64: `libpdfium-darwin-x64.dylib`
+- macOS ARM64: `libpdfium-darwin-arm64.dylib`
+- Windows x64: `pdfium-win32-x64.dll`
 
-# 运行 CLI
-pnpm test:cli -- document.pdf -o ./output
-
-# 运行性能测试
-pnpm benchmark
-```
-
-## 架构设计
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      主线程 (Main Thread)                    │
-│  - 接收用户请求 convert(input, options)                      │
-│  - 初始 I/O：读取文件信息、下载远程文件                         │
-│  - 任务分发：为每一页创建任务并提交到线程池                      │
-│  - 结果收集：等待所有工作线程完成                              │
-│  - 最终 I/O：保存文件或上传 COS                               │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                  piscina 线程池 (Worker Pool)                │
-│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐           │
-│  │ Worker  │ │ Worker  │ │ Worker  │ │ Worker  │ ...       │
-│  │ Thread  │ │ Thread  │ │ Thread  │ │ Thread  │           │
-│  └────┬────┘ └────┬────┘ └────┬────┘ └────┬────┘           │
-│       │           │           │           │                 │
-│       ▼           ▼           ▼           ▼                 │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │           每个工作线程处理单页任务                      │   │
-│  │  1. PDFium 渲染 PDF 页面 → 原始 RGBA 位图              │   │
-│  │  2. Sharp 编码位图 → WebP/PNG/JPG                     │   │
-│  │  3. 返回编码后的 Buffer                               │   │
-│  └─────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## 多平台构建
-
-### 支持的平台
-
-| 平台 | 架构 | 构建方式 |
-|------|------|----------|
-| Linux | x64 | GitHub Actions |
-| Linux | arm64 | GitHub Actions (交叉编译) |
-| macOS | x64 | GitHub Actions (macos-15-intel) |
-| macOS | arm64 | GitHub Actions (macos-latest) |
-| Windows | x64 | GitHub Actions |
-
-### 自动构建流程
-
-推送到以下分支会自动触发 GitHub Actions 构建：
-- `master` / `main`: 正式版本，发布到 latest 标签
-- `beta/*`: 测试版本，发布到 beta 标签
-- `next`: 大版本预览，发布到 next 标签
-- 标签 `v*`: 正式发布版本
-
-GitHub Actions 会：
-1. 为所有 5 个平台编译原生模块
-2. 将编译产物合并到 `node-pdf2img-native` 包
-3. 发布两个 npm 包：
-   - `node-pdf2img-native`: 原生渲染器包
-   - `node-pdf2img`: 主包
-
-### 手动构建
-
-**Linux x64**:
-```bash
-cd packages/native-renderer
-pnpm install
-pnpm run build
-# 产物：pdf-renderer.linux-x64-gnu.node, libpdfium.so
-```
-
-**macOS arm64 (Apple Silicon)**:
-```bash
-cd packages/native-renderer
-pnpm install
-pnpm run build
-# 产物：pdf-renderer.darwin-arm64.node, libpdfium.dylib
-```
-
-**Windows x64**:
-```powershell
-cd packages\native-renderer
-pnpm install
-pnpm run build
-# 产物：pdf-renderer.win32-x64-msvc.node, pdfium.dll
-```
-
-## 性能测试数据
-
-测试环境：Linux x64，32 核 CPU，渲染宽度 1280px
-
-| 文件 | 大小 | 页数 | 耗时 | 平均每页 |
-|------|------|------|------|----------|
-| 发票.pdf | 76.8 KB | 1 | 111 ms | 111 ms |
-| 1M.pdf | 992.5 KB | 14 | 909 ms | 65 ms |
-| 10M.pdf | 8.8 MB | 58 | 3.9 s | 67 ms |
-| DJI 用户手册.pdf | 2.8 MB | 35 | 1.7 s | 49 ms |
-
-## 发布流程
-
-### 版本升级规则
-
-版本号根据 commit message 自动升级：
-
-| Commit 类型 | 版本变化 | 示例 |
-|-------------|----------|------|
-| `feat` | patch | `1.0.0` → `1.0.1` |
-| `fix` | patch | `1.0.0` → `1.0.1` |
-| `perf` | patch | `1.0.0` → `1.0.1` |
-
-### 提交规范
-
-遵循约定式提交规范：
-
-```bash
-# 功能新增
-git commit -m "feat(converter): add support for TIFF format"
-
-# Bug 修复
-git commit -m "fix(cli): fix output path handling on Windows"
-
-# 性能优化
-git commit -m "perf(worker): reduce memory usage"
-```
-
-## 许可证
+## License
 
 MIT

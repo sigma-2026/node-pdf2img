@@ -1,0 +1,25 @@
+[package]
+name = "pdf2img-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Core library for PDF to image conversion using PDFium"
+
+[features]
+default = []
+static = []
+
+[dependencies]
+pdfium-render = { workspace = true }
+image = { workspace = true }
+webp = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+thiserror = { workspace = true }
+once_cell = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

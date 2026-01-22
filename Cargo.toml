@@ -1,0 +1,57 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/pdf2img-core",
+    "crates/pdf2img-cli",
+    "crates/pdf2img-ffi",
+    "demo/rust",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["PDF2IMG Contributors"]
+repository = "https://github.com/nicepkg/pdf2img"
+description = "High-performance PDF to image converter using PDFium"
+
+[workspace.dependencies]
+# PDFium Rust 绑定
+pdfium-render = { version = "0.8", features = ["thread_safe"] }
+
+# 图像处理
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+webp = "0.3"
+
+# 异步运行时
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "fs", "io-util"] }
+
+# HTTP 客户端（用于流式加载）
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "blocking"] }
+
+# 错误处理
+thiserror = "1.0"
+anyhow = "1.0"
+
+# 序列化
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# 全局状态
+once_cell = "1.19"
+
+# 日志
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# 测试
+tempfile = "3"
+
+[profile.release]
+lto = true
+opt-level = 3
+codegen-units = 1
+strip = true
